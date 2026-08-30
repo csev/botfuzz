@@ -3,8 +3,8 @@ BotFuzz
 
 Scan Apache `access.log` for obvious probe 404s (silly paths that will never
 be real URLs), accumulate counts in sorted CSV files, and from time to time
-review the top residue, allow real URLs, then turn the rest into named
-Cloudflare WAF rules.
+review the top residue, categorize each path as allow or block, and grow
+named Cloudflare WAF rules from the blocked ones.
 
 Preset prefixes (on by default)
 -------------------------------
@@ -42,20 +42,27 @@ One-time backfill of rotated logs:
 
     ./botfuzz scan --rotated /var/log/apache2
 
-Then review — every time, before `--mark`
------------------------------------------
+Then review — every time, ten at a time
+---------------------------------------
 
 Presets collapse whole families. What is left in `top` is residue: some of
-it is junk to block, and some of it is a real URL that 404'd. Do not grow
-a Cloudflare rule until you have looked at the batch.
+it is junk to block, and some of it is a real URL that 404'd. Look at a
+small batch and categorize **each** path.
 
-    ./botfuzz top -n 30
-    ./botfuzz allow /real/path --note "why"
-    ./botfuzz top -n 30              # again, until this list is all junk
-    ./botfuzz rule -n 30 --mark
+    ./botfuzz top -n 10
+    ./botfuzz allow /real/path --note "why"     # must not be blocked
+    ./botfuzz block /about/function.php         # put this path in botfuzz-N
+    ./botfuzz top -n 10                         # next ten
 
-Repeat `top` / `allow` until the thirty look like probes. Only then `--mark`.
-Allowing after `--mark` does not pull a path out of a frozen Cloudflare rule.
+`block` writes the open named rule immediately (same CSVs as `--mark`).
+Paste the printed expression into Cloudflare when it changes. Repeat until
+`top` is empty or you are done for the day.
+
+`./botfuzz rule -n 10 --mark` still works as “block whatever is left in this
+batch” after you have allowed the real URLs.
+
+Allowing after a path is already in a frozen Cloudflare rule does not pull
+it out. Categorize before you block when you can.
 
 Named bot rules
 ---------------
@@ -71,7 +78,7 @@ that rule’s date and MD5; update the same Cloudflare rule in the dashboard
 starts `botfuzz-2`. That keeps you from burning the five free Cloudflare
 rules on half-empty expressions.
 
-    ./botfuzz rule -n 30            # preview; shows chars/3800
+    ./botfuzz rule -n 10            # preview; shows chars/3800
     ./botfuzz rule --list           # which rules are open vs frozen
 
     ./botfuzz rule --show botfuzz-1

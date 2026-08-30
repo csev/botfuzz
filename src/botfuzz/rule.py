@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 MAX_EXPR = 3800
 DEFAULT_PER_RULE = 0  # 0 = no path-count cap; freeze only when the expression is ~4k
+DEFAULT_BATCH = 10  # review this many paths at a time (allow or block each)
 RULE_NAME_RE = re.compile(r"^botfuzz-(\d+)$")
 
 
@@ -194,7 +195,7 @@ def assign_new(
 
 def print_rule_list(rules: list[BotRule]) -> None:
     if not rules:
-        print("No named bot rules yet. Run: ./botfuzz rule -n 30 --mark")
+        print("No named bot rules yet. Run: ./botfuzz top  then allow or block each path")
         return
     print(
         f"{'name':<12} {'status':<8} {'date':<12} {'md5':<12} "

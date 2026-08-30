@@ -11,6 +11,7 @@ from .csvstore import Allowed, Hit, Store, is_allowed
 from .parse import parse_access_line
 from .probes import is_probe
 from .rule import (
+    DEFAULT_BATCH,
     DEFAULT_PER_RULE,
     assign_new,
     cloudflare_safe,
@@ -23,6 +24,7 @@ from .presets import (
     PRESETS,
     covers_not_wordpress,
     covers_obvious_bad,
+    covers_path,
     covers_root_php,
     default_enabled,
     preset_prefix,
@@ -68,7 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--self-test", action="store_true", help="Run probe checks and exit")
 
     top = sub.add_parser("top", help="Show the worst unmarked probe paths")
-    top.add_argument("-n", "--n", type=int, default=30, help="How many paths (default 30)")
+    top.add_argument(
+        "-n",
+        "--n",
+        type=int,
+        default=DEFAULT_BATCH,
+        help=f"How many paths (default {DEFAULT_BATCH})",
+    )
 
     rule = sub.add_parser(
         "rule",
@@ -79,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--n",
         type=int,
         default=None,
-        help="How many new paths to add (default 30; omitted with --freeze so the last rule is locked as-is)",
+        help=f"How many new paths to add (default {DEFAULT_BATCH}; omitted with --freeze so the last rule is locked as-is)",
     )
     rule.add_argument(
         "--per-rule",
@@ -143,6 +151,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exact path, or a prefix ending in / (e.g. /app/ skips everything under it)",
     )
     allow.add_argument("--note", default="", help="Optional reason")
+
+    block = sub.add_parser(
+        "block",
+        help="Put one or more exact paths into the open Cloudflare bot rule",
+    )
+    block.add_argument(
+        "paths",
+        nargs="+",
+        help="Exact URL path(s) to block (e.g. /about/function.php)",
+    )
     return parser
 
 
@@ -375,9 +393,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if stats.preset_probes:
         print(f"  {stats.preset_probes} collapsed by presets (not counted in hits.csv)")
     print(f"  {stats.new_paths} new paths, {len(store.hits)} total in {store.hits_path}")
-    print("Next: ./botfuzz top -n 30")
-    print("Allow anything that must not be blocked, then top -n 30 again.")
-    print("When the list is all junk: ./botfuzz rule -n 30 --mark")
+    print(f"Next: ./botfuzz top -n {DEFAULT_BATCH}")
+    print("For each path:  ./botfuzz allow PATH --note \"...\"  or  ./botfuzz block PATH")
+    print("Then top again.")
     return 0
 
 
@@ -407,11 +425,8 @@ def cmd_top(args: argparse.Namespace) -> int:
         print(
             f"({len(covered)} path(s) omitted — covered by presets: {', '.join(on)})"
         )
-    print(
-        f"Allow false positives: ./botfuzz allow /path --note \"...\""
-    )
-    print(f"Then: ./botfuzz top -n {args.n}   (again, until this list is all junk)")
-    print(f"Then: ./botfuzz rule -n {args.n} --mark")
+    print(f"For each path:  ./botfuzz allow PATH --note \"...\"  or  ./botfuzz block PATH")
+    print(f"Then: ./botfuzz top -n {args.n}")
     return 0
 
 
@@ -443,7 +458,7 @@ def cmd_rule(args: argparse.Namespace) -> int:
         return 0
     if args.all:
         if not existing:
-            print("No named bot rules yet. Run: ./botfuzz rule -n 30 --mark")
+            print(f"No named bot rules yet. Run: ./botfuzz top -n {DEFAULT_BATCH}")
             return 0
         print_assignment(existing, [], show_all=True)
         return 0
@@ -453,7 +468,7 @@ def cmd_rule(args: argparse.Namespace) -> int:
         usable: list[str] = []
         skipped: list[str] = []
     else:
-        n = 30 if args.n is None else args.n
+        n = DEFAULT_BATCH if args.n is None else args.n
         hits = store.top_unmarked(n)
         paths = [h.path for h in hits]
         usable = [p for p in paths if cloudflare_safe(p)]
@@ -484,8 +499,8 @@ def cmd_rule(args: argparse.Namespace) -> int:
         print(f"# saved {added} new path(s); rules in {store.rules_path}")
     elif any(r.changed for r in updated):
         print(
-            "# preview only — if any path should not be blocked, allow it, "
-            "run top again, then --mark"
+            "# preview only — categorize each path with allow or block, "
+            f"or pass --mark to block the current top {DEFAULT_BATCH}"
         )
     return 0
 
@@ -556,6 +571,58 @@ def cmd_allow(args: argparse.Namespace) -> int:
             "frozen Cloudflare rules are not rewritten. "
             "Allow list only prevents new assignments."
         )
+        return 0
+
+
+def _norm_path(path: str) -> str:
+    if not path.startswith("/"):
+        return "/" + path
+    return path
+
+
+def cmd_block(args: argparse.Namespace) -> int:
+    """Categorize specific paths as block: add them to the open named rule."""
+    store = Store(args.data)
+    store.load()
+    enabled = store.enabled_presets()
+    existing = store.load_botrules()
+    usable: list[str] = []
+    skipped: list[str] = []
+    for raw in args.paths:
+        path = _norm_path(raw)
+        if is_allowed(path, store.allow):
+            print(f"# skip {path} — on the allow list")
+            continue
+        if covers_path(path, enabled):
+            print(f"# skip {path} — already covered by a preset")
+            continue
+        if path in store.ruled:
+            print(f"# skip {path} — already in {store.ruled[path].rule}")
+            continue
+        if not cloudflare_safe(path):
+            skipped.append(path)
+            continue
+        usable.append(path)
+    if not usable:
+        if skipped:
+            print_assignment(existing, skipped)
+        else:
+            print("Nothing to block")
+        return 0
+    today = datetime.now(timezone.utc).date().isoformat()
+    prefix = preset_prefix(enabled)
+    updated = assign_new(
+        existing,
+        usable,
+        per_rule=DEFAULT_PER_RULE,
+        today=today,
+        prefix=prefix,
+    )
+    print_assignment(updated, skipped)
+    added = store.sync_botrules(updated)
+    store.save_ruled()
+    store.save_rules()
+    print(f"# saved {added} new path(s); rules in {store.rules_path}")
     return 0
 
 
@@ -571,6 +638,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_preset(args)
     if args.cmd == "allow":
         return cmd_allow(args)
+    if args.cmd == "block":
+        return cmd_block(args)
     build_parser().error(f"unknown command {args.cmd}")
     return 2
 
