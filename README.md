@@ -26,17 +26,22 @@ Lasting defaults live in `presets.sample.csv` at the repo root (survives
 `rm -rf data`). After a reset, that sample is copied to `data/presets.csv`.
 Edit the sample if you want every fresh start to keep `not-wordpress` off.
 
-Daily
------
+Daily (or every few days)
+-------------------------
 
     ./botfuzz scan /var/log/apache2
 
 That merges new probes into `data/hits.csv` and remembers how far it read
 (`data/state.json`) so a second run the same day does not double-count.
+Do **not** pass `--rotated` on this cadence: the live `access.log` is enough,
+and rotated `.gz` files would look like new inodes.
 
-One-time backfill of rotated logs:
+If it has been about a **week** (or more) since the last scan, catch up
+once on files logrotate already moved aside:
 
     ./botfuzz scan --rotated /var/log/apache2
+
+Then go back to scanning the live log only.
 
 Then review — every time, ten at a time
 ---------------------------------------
