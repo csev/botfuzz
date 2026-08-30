@@ -54,6 +54,11 @@ small batch and categorize **each** path.
     ./botfuzz top -n 20 --interactive    # a different batch size
     ./botfuzz emit                       # regenerate Cloudflare paste from latest
 
+If you have an LLM handy, dump a batch first (`./botfuzz top -n 20`), paste
+it in, and ask which paths look like real URLs vs scanner junk. Then run
+`--interactive` with those notes. The tool still needs your **a** / **b**
+on each path; the model is only advice.
+
 `block` / interactive **b** only queues paths (`data/pending.csv`). They are
 not in a Cloudflare rule until you **emit**. Emit folds the queue into the
 open named rule, refreshes preset prefixes, writes `data/rules/botfuzz-N.txt`,
