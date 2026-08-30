@@ -1,0 +1,6 @@
+#!/bin/sh
+# BotFuzz: Apache probe 404s -> CSV -> Cloudflare WAF rules
+ROOT="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec python3 -m botfuzz "$@"
