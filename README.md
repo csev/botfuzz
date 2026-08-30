@@ -3,8 +3,8 @@ BotFuzz
 
 Scan Apache `access.log` for obvious probe 404s (silly paths that will never
 be real URLs), accumulate counts in sorted CSV files, and from time to time
-review the top residue, categorize each path as allow or block, and grow
-named Cloudflare WAF rules from the blocked ones.
+review the top residue, categorize each path as allow or block, then
+**emit** paste-ready Cloudflare WAF rules from the latest decisions.
 
 Preset prefixes (on by default)
 -------------------------------
@@ -49,24 +49,25 @@ Presets collapse whole families. What is left in `top` is residue: some of
 it is junk to block, and some of it is a real URL that 404'd. Look at a
 small batch and categorize **each** path.
 
-    ./botfuzz top --interactive          # default 10; a=allow b=block other=skip
+    ./botfuzz top --interactive          # default 10; a=allow b=queue-block other=skip
+    ./botfuzz emit                       # regenerate Cloudflare paste from latest
 
-Or one path at a time from a printed list:
+`block` / interactive **b** only queues paths (`data/pending.csv`). They are
+not in a Cloudflare rule until you **emit**. Emit folds the queue into the
+open named rule, refreshes preset prefixes, writes `data/rules/botfuzz-N.txt`,
+and prints what to paste. Run emit again anytime to reprint from the latest
+ruled paths and presets (no new residue is scooped up).
 
-    ./botfuzz top -n 10
-    ./botfuzz allow /real/path --note "why"
-    ./botfuzz block /about/function.php
-    ./botfuzz top -n 10
+    ./botfuzz block /about/function.php  # queue
+    ./botfuzz block                      # list the queue
+    ./botfuzz emit                       # write rules and print paste
+    ./botfuzz emit --all                 # reprint every named rule
 
-`block` writes the open named rule immediately (same CSVs as `--mark`).
-Paste the printed expression into Cloudflare when it changes. Repeat until
-`top` is empty or you are done for the day.
-
-`./botfuzz rule -n 10 --mark` still works as “block whatever is left in this
-batch” after you have allowed the real URLs.
+`./botfuzz rule -n 10 --mark` still works as “take the current top batch
+into the rule immediately” if you do not want the queue.
 
 Allowing after a path is already in a frozen Cloudflare rule does not pull
-it out. Categorize before you block when you can.
+it out. Categorize before you emit when you can.
 
 Named bot rules
 ---------------
@@ -75,23 +76,18 @@ Residue paths go into `botfuzz-1`, `botfuzz-2`, … **botfuzz-1** starts with
 the enabled preset expressions, then exact residue paths. Later rules are
 residue only.
 
-A named rule **stays open** and grows across runs until its Cloudflare
-expression is about 4k characters. Each `--mark` that adds paths updates
-that rule’s date and MD5; update the same Cloudflare rule in the dashboard
-(do not create a new one). When it is full it freezes, and the next run
-starts `botfuzz-2`. That keeps you from burning the five free Cloudflare
-rules on half-empty expressions.
+A named rule **stays open** and grows across **emit** runs until its
+Cloudflare expression is about 4k characters. Each emit that adds paths
+updates that rule’s date and MD5; update the same Cloudflare rule in the
+dashboard (do not create a new one). When it is full it freezes, and the
+next emit starts `botfuzz-2`. That keeps you from burning the five free
+Cloudflare rules on half-empty expressions.
 
-    ./botfuzz rule -n 10            # preview; shows chars/3800
+    ./botfuzz emit                  # from pending + current presets
+    ./botfuzz emit --all            # reprint every named rule
     ./botfuzz rule --list           # which rules are open vs frozen
-
     ./botfuzz rule --show botfuzz-1
-    ./botfuzz rule --all            # reprint every generated rule (recovery)
-    ./botfuzz rule --freeze         # lock the last rule early; next run starts N+1
-
-`--mark` writes `data/ruled.csv`, `data/rules.csv`, and
-`data/rules/botfuzz-N.txt` (the paste-ready expression, overwritten as the
-open rule grows). Only rules whose MD5 changed are printed to paste.
+    ./botfuzz rule --freeze         # lock the last rule early; next emit starts N+1
 
 Allow list
 ----------
@@ -126,6 +122,7 @@ over.
 - `hits.csv` — residue probe paths (presets are not counted): path, count, first_seen, last_seen, status, sample_ip
 - `presets.csv` — live on/off copy (restored from `presets.sample.csv` after a wipe)
 - `allow.csv` — paths (or prefixes ending in `/`) that must never go into a Cloudflare rule: path, note
+- `pending.csv` — queued block paths (**gitignored**); folded in by `emit`
 - `ruled.csv` — paths already in a generated bot rule: path, ruled_at, count_when_ruled, rule
 - `rules.csv` — generated rules: name, cloudflare_name, created, updated, md5, frozen, chars, prefix
 - `rules/botfuzz-N.txt` — paste-ready expression for each named rule (updated in place while open)
@@ -134,7 +131,7 @@ over.
 Sharing and reset
 -----------------
 
-Run, `--mark`, commit `data/`. Others can paste `data/rules/botfuzz-*.txt`
+Run, `emit`, commit `data/`. Others can paste `data/rules/botfuzz-*.txt`
 if they use the same presets (not WordPress, obvious-bad on).
 
 If they **are** WordPress, or they do not want your accumulated residue

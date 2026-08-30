@@ -14,12 +14,14 @@ HITS_FIELDS = ["path", "count", "first_seen", "last_seen", "status", "sample_ip"
 RULED_FIELDS = ["path", "ruled_at", "count_when_ruled", "rule"]
 RULES_FIELDS = ["name", "cloudflare_name", "created", "updated", "md5", "frozen", "chars", "prefix"]
 ALLOW_FIELDS = ["path", "note"]
+PENDING_FIELDS = ["path"]
 PRESETS_FIELDS = ["name", "enabled"]
 STATE_FILENAME = "state.json"
 HITS_FILENAME = "hits.csv"
 RULED_FILENAME = "ruled.csv"
 RULES_FILENAME = "rules.csv"
 ALLOW_FILENAME = "allow.csv"
+PENDING_FILENAME = "pending.csv"
 PRESETS_FILENAME = "presets.csv"
 PRESETS_SAMPLE_FILENAME = "presets.sample.csv"
 
@@ -128,6 +130,7 @@ class Store:
     ruled: dict[str, Ruled] = field(default_factory=dict)
     rules: dict[str, RuleMeta] = field(default_factory=dict)
     allow: dict[str, Allowed] = field(default_factory=dict)
+    pending: dict[str, None] = field(default_factory=dict)
     preset_flags: dict[str, bool] = field(default_factory=dict)
     watermarks: dict[str, FileWatermark] = field(default_factory=dict)
 
@@ -148,6 +151,10 @@ class Store:
         return os.path.join(self.data_dir, ALLOW_FILENAME)
 
     @property
+    def pending_path(self) -> str:
+        return os.path.join(self.data_dir, PENDING_FILENAME)
+
+    @property
     def presets_path(self) -> str:
         return os.path.join(self.data_dir, PRESETS_FILENAME)
 
@@ -161,6 +168,7 @@ class Store:
         self.ruled = _read_ruled(self.ruled_path)
         self.rules = _read_rules(self.rules_path)
         self.allow = _read_allow(self.allow_path)
+        self.pending = _read_pending(self.pending_path)
         if not os.path.isfile(self.presets_path):
             sample = sample_presets_path()
             if os.path.isfile(sample):
@@ -291,6 +299,7 @@ class Store:
         return [
             h for h in self.hits.values()
             if h.path not in self.ruled
+            and h.path not in self.pending
             and not is_allowed(h.path, self.allow)
             and not covers_path(h.path, enabled)
             and not is_legit_path(h.path)
@@ -323,6 +332,25 @@ class Store:
             return False
         self.allow[path] = Allowed(path=path, note=note)
         return True
+
+    def add_pending(self, path: str) -> bool:
+        """Queue a path to block on the next emit. Returns True if it was new."""
+        if path in self.pending or path in self.ruled:
+            return False
+        self.pending[path] = None
+        return True
+
+    def save_pending(self) -> None:
+        os.makedirs(self.data_dir, exist_ok=True)
+        with open(self.pending_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=PENDING_FIELDS)
+            writer.writeheader()
+            for path in sorted(self.pending):
+                writer.writerow({"path": path})
+
+    def clear_pending(self) -> None:
+        self.pending = {}
+        self.save_pending()
 
     def mark_ruled(self, paths: list[str], rule_name: str, when: Optional[datetime] = None) -> int:
         from .presets import covers_path
@@ -504,6 +532,18 @@ def _read_allow(path: str) -> dict[str, Allowed]:
                 continue
             allow[p] = Allowed(path=p, note=row.get("note") or "")
     return allow
+
+
+def _read_pending(path: str) -> dict[str, None]:
+    pending: dict[str, None] = {}
+    if not os.path.isfile(path):
+        return pending
+    with open(path, newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            p = row.get("path") or ""
+            if p:
+                pending[p] = None
+    return pending
 
 
 def _read_preset_flags(path: str) -> dict[str, bool]:

@@ -161,12 +161,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     block = sub.add_parser(
         "block",
-        help="Put one or more exact paths into the open Cloudflare bot rule",
+        help="Queue exact paths to block (does not write Cloudflare rules until emit)",
     )
     block.add_argument(
         "paths",
-        nargs="+",
-        help="Exact URL path(s) to block (e.g. /about/function.php)",
+        nargs="*",
+        help="Exact URL path(s) to queue (omit to list the queue)",
+    )
+
+    emit = sub.add_parser(
+        "emit",
+        help="Regenerate paste-ready Cloudflare rules from the latest blocked paths and presets",
+    )
+    emit.add_argument(
+        "--all",
+        action="store_true",
+        help="Print every named rule, not only ones whose MD5 changed",
     )
     return parser
 
@@ -384,6 +394,12 @@ def self_test() -> int:
     if "/app/api/notifications.php" in unmarked:
         print("FAIL 403 on a real PHP script should not be residue")
         return 1
+    store.hits["/queued.php"] = Hit(path="/queued.php", count=8, status=404)
+    store.pending["/queued.php"] = None
+    unmarked = [h.path for h in store.unmarked_hits()]
+    if "/queued.php" in unmarked:
+        print("FAIL pending block queue should hide /queued.php from top")
+        return 1
     print("self-test ok")
     return 0
 
@@ -401,7 +417,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print(f"  {stats.preset_probes} collapsed by presets (not counted in hits.csv)")
     print(f"  {stats.new_paths} new paths, {len(store.hits)} total in {store.hits_path}")
     print(f"Next: ./botfuzz top -n {DEFAULT_BATCH} --interactive")
-    print("a=allow  b=block  anything else=skip")
+    print("a=allow  b=block (queues)  anything else=skip")
+    print("When ready: ./botfuzz emit")
     return 0
 
 
@@ -434,7 +451,10 @@ def cmd_top(args: argparse.Namespace) -> int:
             f"({len(covered)} path(s) omitted — covered by presets: {', '.join(on)})"
         )
     print(f"Interactive: ./botfuzz top -n {args.n} --interactive")
-    print("  a=allow  b=block  anything else=skip")
+    print("  a=allow  b=block (queues)  anything else=skip")
+    print("  Then: ./botfuzz emit")
+    if store.pending:
+        print(f"({len(store.pending)} path(s) queued to block — ./botfuzz emit)")
     return 0
 
 
@@ -446,8 +466,8 @@ def cmd_top_interactive(store: Store, hits: list[Hit]) -> int:
     n = len(hits)
     allowed_n = 0
     skipped_n = 0
-    to_block: list[str] = []
-    print("a=allow  b=block  anything else=skip  (Ctrl-C finishes and saves blocks)")
+    print("a=allow  b=block (queues)  anything else=skip")
+    print("Ctrl-C stops. Run ./botfuzz emit when you want Cloudflare paste.")
     try:
         for i, hit in enumerate(hits, start=1):
             print(f"{i}/{n}  {hit.count:>{width}}  {hit.path}")
@@ -467,16 +487,25 @@ def cmd_top_interactive(store: Store, hits: list[Hit]) -> int:
                 allowed_n += 1
                 print(f"  allowed {hit.path}")
             elif raw == "b":
-                to_block.append(hit.path)
-                print(f"  will block {hit.path}")
+                if is_allowed(hit.path, store.allow):
+                    print("  skip — on the allow list")
+                    skipped_n += 1
+                    continue
+                if hit.path in store.ruled:
+                    print(f"  skip — already in {store.ruled[hit.path].rule}")
+                    skipped_n += 1
+                    continue
+                store.add_pending(hit.path)
+                store.save_pending()
+                print(f"  queued {hit.path}")
             else:
                 skipped_n += 1
                 print("  skipped")
     except KeyboardInterrupt:
         print("\n(stopped)")
-    print(f"Allowed {allowed_n}, queued to block {len(to_block)}, skipped {skipped_n}")
-    if to_block:
-        return apply_blocks(store, to_block)
+    print(f"Allowed {allowed_n}, queued to block {len(store.pending)} total, skipped {skipped_n}")
+    if store.pending:
+        print("Run ./botfuzz emit to regenerate Cloudflare rules from the latest queue")
     return 0
 
 
@@ -630,8 +659,8 @@ def _norm_path(path: str) -> str:
     return path
 
 
-def apply_blocks(store: Store, paths: list[str]) -> int:
-    """Add exact paths to the open named rule and print paste text."""
+def apply_blocks(store: Store, paths: list[str], *, show_all: bool = False) -> int:
+    """Grow named rules from paths, write paste files, print what changed."""
     enabled = store.enabled_presets()
     existing = store.load_botrules()
     usable: list[str] = []
@@ -651,14 +680,11 @@ def apply_blocks(store: Store, paths: list[str]) -> int:
             skipped.append(path)
             continue
         usable.append(path)
-    if not usable:
-        if skipped:
-            print_assignment(existing, skipped)
-        else:
-            print("Nothing to block")
-        return 0
     today = datetime.now(timezone.utc).date().isoformat()
     prefix = preset_prefix(enabled)
+    if not usable and not existing and not prefix:
+        print("Nothing to emit. Queue paths with block or top --interactive, then emit.")
+        return 0
     updated = assign_new(
         existing,
         usable,
@@ -666,18 +692,54 @@ def apply_blocks(store: Store, paths: list[str]) -> int:
         today=today,
         prefix=prefix,
     )
-    print_assignment(updated, skipped)
+    print_assignment(updated, skipped, show_all=show_all)
     added = store.sync_botrules(updated)
     store.save_ruled()
     store.save_rules()
+    store.clear_pending()
     print(f"# saved {added} new path(s); rules in {store.rules_path}")
+    print("# paste any changed expression into Cloudflare (same botfuzz-N, new date+MD5)")
     return 0
 
 
 def cmd_block(args: argparse.Namespace) -> int:
     store = Store(args.data)
     store.load()
-    return apply_blocks(store, args.paths)
+    if not args.paths:
+        if not store.pending:
+            print("Block queue is empty. Add paths or use top --interactive, then ./botfuzz emit")
+            return 0
+        print(f"{len(store.pending)} queued (not in Cloudflare until emit):")
+        for path in sorted(store.pending):
+            print(path)
+        print("Run: ./botfuzz emit")
+        return 0
+    added = 0
+    for raw in args.paths:
+        path = _norm_path(raw)
+        if is_allowed(path, store.allow):
+            print(f"# skip {path} — on the allow list")
+            continue
+        if covers_path(path, store.enabled_presets()):
+            print(f"# skip {path} — already covered by a preset")
+            continue
+        if path in store.ruled:
+            print(f"# skip {path} — already in {store.ruled[path].rule}")
+            continue
+        if not store.add_pending(path):
+            print(f"# already queued {path}")
+            continue
+        added += 1
+        print(f"queued {path}")
+    store.save_pending()
+    print(f"{len(store.pending)} in queue. Run ./botfuzz emit to regenerate Cloudflare rules.")
+    return 0
+
+
+def cmd_emit(args: argparse.Namespace) -> int:
+    store = Store(args.data)
+    store.load()
+    return apply_blocks(store, list(store.pending), show_all=args.all)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -694,6 +756,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_allow(args)
     if args.cmd == "block":
         return cmd_block(args)
+    if args.cmd == "emit":
+        return cmd_emit(args)
     build_parser().error(f"unknown command {args.cmd}")
     return 2
 
