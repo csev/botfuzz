@@ -19,8 +19,9 @@ and those hits are not counted in `hits.csv`.
 2. **not-wordpress** — on by default. Turn off if the host runs WordPress
    (and turn off **root-php** as well).
 3. **root-php** — on by default. Blocks `/*.php` at the document root except
-   brochure pages (`index.php`, `about.php`, `contact.php`, …). Turn off if
-   you serve other PHP files at `/`.
+   `index.php`, `about.php`, `contact.php`, and `home.php`. Turn off if you
+   serve other PHP files at `/`. The allow list is **not** copied into
+   Cloudflare; it only keeps those paths out of residue `in { … }` lists.
 
     ./botfuzz preset                     # on/off (writes data/presets.csv)
     ./botfuzz preset not-wordpress off
@@ -93,8 +94,13 @@ Allow list
 ----------
 
 A 404 can still look like a probe (e.g. `/manifest.json`) but be something
-you do not want Cloudflare to block. Entries in `data/allow.csv` stay in
-`hits.csv` so you can see them, but `top` and `rule` skip them.
+you do not want Cloudflare to block. The allow list lives **only in BotFuzz**
+(`data/allow.csv`). `top`, `block`, and `emit` skip those paths so they never
+go into a `in { … }` block list. Hundreds of allows do not consume Cloudflare
+character budget.
+
+Allowing a path does not pull it out of a frozen bot rule already in
+Cloudflare. Allow it before `emit` when you can.
 
 - Exact path: `/manifest.json`
 - Prefix: `/app/` (trailing slash) skips every path under that tree
@@ -108,9 +114,6 @@ path,note
     ./botfuzz allow /manifest.json --note "PWA clients fetch this"
     ./botfuzz allow /app/ --note "application"
     ./botfuzz allow                 # list
-
-Allowing a path does not pull it out of a frozen bot rule already in
-Cloudflare. Add it to the allow list before `--mark` when you can.
 
 CSV files
 ---------
@@ -155,6 +158,9 @@ not a probe. Common page names such as `index.php`, `about.php`,
 `contact.php`, and `privacy.php` are never probes (any directory). Names
 like `admin.php` and `1.php` still count when they 404. Ordinary 404s on
 HTML or other non-PHP paths are ignored. Use the allow list if a real
-PHP URL is being miscounted.
+PHP URL is being miscounted. The Cloudflare **root-php** block only excepts
+`index.php` / `about.php` / `contact.php` / `home.php`. Other common names
+are ignored in `top` but still blocked at the edge if a scanner requests
+them. The allow list is never pasted into Cloudflare.
 
     ./botfuzz scan --self-test

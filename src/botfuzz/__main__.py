@@ -360,6 +360,13 @@ def self_test() -> int:
     if covers_root_php("/about.php") or covers_root_php("/index.php"):
         print("FAIL brochure pages must not be root-php")
         return 1
+    pref = preset_prefix(default_enabled())
+    if "/newsletter.php" in pref:
+        print("FAIL Cloudflare root-php must not except names we have never seen")
+        return 1
+    if "/index.php" not in pref or "/about.php" not in pref:
+        print("FAIL Cloudflare root-php should except index.php and about.php")
+        return 1
     if covers_root_php("/about/function.php") or covers_root_php("/blog/post.php"):
         print("FAIL nested PHP must not be root-php")
         return 1
