@@ -285,7 +285,7 @@ class Store:
 
     def unmarked_hits(self) -> list[Hit]:
         from .presets import covers_path
-        from .probes import is_legit_path
+        from .probes import is_legit_path, is_probe_path
 
         enabled = self.enabled_presets()
         return [
@@ -294,6 +294,7 @@ class Store:
             and not is_allowed(h.path, self.allow)
             and not covers_path(h.path, enabled)
             and not is_legit_path(h.path)
+            and (not h.status or is_probe_path(h.path, h.status))
         ]
 
     def preset_hits(self) -> list[Hit]:

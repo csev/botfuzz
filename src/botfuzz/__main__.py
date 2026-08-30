@@ -208,6 +208,26 @@ def self_test() -> int:
             '404 123 "-" "curl/8.0"',
             True,
         ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /app/api/notifications.php HTTP/1.1" 403 123 "-" "Mozilla/5.0"',
+            False,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /app/api/notifications.php HTTP/1.1" 404 123 "-" "curl/8.0"',
+            True,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /.git/config HTTP/1.1" '
+            '403 123 "-" "curl/8.0"',
+            True,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /shell.php HTTP/1.1" '
+            '403 123 "-" "curl/8.0"',
+            True,
+        ),
     ]
     failed = 0
     for raw, expect in cases:
@@ -331,6 +351,13 @@ def self_test() -> int:
         return 1
     if "/about/function.php" not in unmarked:
         print("FAIL nested PHP should still be residue")
+        return 1
+    store.hits["/app/api/notifications.php"] = Hit(
+        path="/app/api/notifications.php", count=4400, status=403
+    )
+    unmarked = [h.path for h in store.unmarked_hits()]
+    if "/app/api/notifications.php" in unmarked:
+        print("FAIL 403 on a real PHP script should not be residue")
         return 1
     print("self-test ok")
     return 0

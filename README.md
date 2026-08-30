@@ -140,11 +140,13 @@ WordPress blocking off. Then scan their own logs and grow their own botfuzz-1.
 What counts as a probe
 ----------------------
 
-400/403/404 on scanner paths (`.git`, `.env`, `wp-admin`, phpmyadmin, …)
-and on PHP files, except common page names such as `index.php`,
-`about.php`, `contact.php`, and `privacy.php` (any directory). Names like
-`admin.php` and `1.php` still count. Ordinary 404s on HTML or other
-non-PHP paths are ignored. Use the allow list if a real PHP URL is being
-miscounted.
+400/403/404 on scanner paths (`.git`, `.env`, `wp-admin`, phpmyadmin, …).
+PHP files count only on **404** (the script is missing). A **403** on a
+real script is the app refusing access (logged-out API poll, CSRF, …),
+not a probe. Common page names such as `index.php`, `about.php`,
+`contact.php`, and `privacy.php` are never probes (any directory). Names
+like `admin.php` and `1.php` still count when they 404. Ordinary 404s on
+HTML or other non-PHP paths are ignored. Use the allow list if a real
+PHP URL is being miscounted.
 
     ./botfuzz scan --self-test

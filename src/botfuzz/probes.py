@@ -27,7 +27,10 @@ ACCESS_PROBE_PATH = re.compile(
 PHP_EXT = re.compile(r"\.(?:php[0-9]?|phtml|phar)$", re.I)
 ROOT_PHP = re.compile(r"^/[^/]+\.(?:php[0-9]?|phtml|phar)$", re.I)
 
-PROBE_STATUS = (400, 403, 404)
+# Silly/scanner URLs: 403 is still a probe (.git forbidden, WAF, etc.).
+SCANNER_STATUS = (400, 403, 404)
+# Other PHP: only a missing file. 403 means the script exists and refused access.
+MISSING_STATUS = (404,)
 
 # Common real pages (basename match, any directory). Not admin.php / *.php junk.
 LEGIT_BASENAMES = frozenset({
@@ -93,21 +96,29 @@ def is_root_php(path: str) -> bool:
     return bool(path and ROOT_PHP.match(path))
 
 
-def is_probe(event: Event) -> bool:
-    """True if this access event is a scanner path worth tracking."""
-    if event.garbage:
+def is_scanner_path(path: str) -> bool:
+    if not path or path == "-":
         return False
-    if event.status not in PROBE_STATUS:
-        return False
-    path = event.path or ""
+    if ACCESS_PROBE_PATH.search(path):
+        return True
+    return path.startswith("/.")
+
+
+def is_probe_path(path: str, status: int) -> bool:
+    """True if this path+status pair is a scanner hit, not a real app response."""
     if not path or path == "-":
         return False
     if is_legit_path(path):
         return False
-    if ACCESS_PROBE_PATH.search(path):
-        return True
-    if path.startswith("/."):
-        return True
+    if is_scanner_path(path):
+        return status in SCANNER_STATUS
     if PHP_EXT.search(path):
-        return True
+        return status in MISSING_STATUS
     return False
+
+
+def is_probe(event: Event) -> bool:
+    """True if this access event is a scanner path worth tracking."""
+    if event.garbage:
+        return False
+    return is_probe_path(event.path or "", event.status)
