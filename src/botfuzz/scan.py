@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from .csvstore import Store
 from .parse import iter_log_lines, list_log_files, parse_access_line
+from .presets import covers_path
 from .probes import is_probe
 
 
@@ -17,6 +18,7 @@ class ScanStats:
     lines: int = 0
     parsed: int = 0
     probes: int = 0
+    preset_probes: int = 0
     new_paths: int = 0
 
 
@@ -70,6 +72,7 @@ def _start_offset(store: Store, path: str, inode: int, size: int) -> int | None:
 
 def scan_files(store: Store, files: list[str]) -> ScanStats:
     stats = ScanStats()
+    enabled = store.enabled_presets()
     for path in files:
         st = os.stat(path)
         inode, size = st.st_ino, st.st_size
@@ -90,6 +93,9 @@ def scan_files(store: Store, files: list[str]) -> ScanStats:
             if not is_probe(event):
                 continue
             stats.probes += 1
+            if covers_path(event.path, enabled):
+                stats.preset_probes += 1
+                continue
             if store.note_hit(event.path, event.time, event.status, event.ip):
                 stats.new_paths += 1
         end_size = os.stat(path).st_size

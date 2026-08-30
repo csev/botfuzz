@@ -5,19 +5,32 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
 HITS_FIELDS = ["path", "count", "first_seen", "last_seen", "status", "sample_ip"]
 RULED_FIELDS = ["path", "ruled_at", "count_when_ruled", "rule"]
-RULES_FIELDS = ["name", "cloudflare_name", "created", "updated", "md5", "frozen"]
+RULES_FIELDS = ["name", "cloudflare_name", "created", "updated", "md5", "frozen", "chars", "prefix"]
 ALLOW_FIELDS = ["path", "note"]
+PRESETS_FIELDS = ["name", "enabled"]
 STATE_FILENAME = "state.json"
 HITS_FILENAME = "hits.csv"
 RULED_FILENAME = "ruled.csv"
 RULES_FILENAME = "rules.csv"
 ALLOW_FILENAME = "allow.csv"
+PRESETS_FILENAME = "presets.csv"
+PRESETS_SAMPLE_FILENAME = "presets.sample.csv"
+
+
+def repo_root() -> str:
+    # src/botfuzz/csvstore.py -> repo root
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def sample_presets_path() -> str:
+    return os.path.join(repo_root(), PRESETS_SAMPLE_FILENAME)
 
 
 def _parse_dt(value: str) -> Optional[datetime]:
@@ -77,6 +90,8 @@ class RuleMeta:
     updated: str = ""
     md5: str = ""
     frozen: bool = False
+    prefix: str = ""
+    chars: int = 0
 
 
 @dataclass
@@ -99,6 +114,7 @@ class Store:
     ruled: dict[str, Ruled] = field(default_factory=dict)
     rules: dict[str, RuleMeta] = field(default_factory=dict)
     allow: dict[str, Allowed] = field(default_factory=dict)
+    preset_flags: dict[str, bool] = field(default_factory=dict)
     watermarks: dict[str, FileWatermark] = field(default_factory=dict)
 
     @property
@@ -118,6 +134,10 @@ class Store:
         return os.path.join(self.data_dir, ALLOW_FILENAME)
 
     @property
+    def presets_path(self) -> str:
+        return os.path.join(self.data_dir, PRESETS_FILENAME)
+
+    @property
     def state_path(self) -> str:
         return os.path.join(self.data_dir, STATE_FILENAME)
 
@@ -127,6 +147,13 @@ class Store:
         self.ruled = _read_ruled(self.ruled_path)
         self.rules = _read_rules(self.rules_path)
         self.allow = _read_allow(self.allow_path)
+        if not os.path.isfile(self.presets_path):
+            sample = sample_presets_path()
+            if os.path.isfile(sample):
+                shutil.copy(sample, self.presets_path)
+        self.preset_flags = _read_preset_flags(self.presets_path)
+        if not os.path.isfile(self.presets_path):
+            self.save_presets()
         self.watermarks = _read_watermarks(self.state_path)
 
     def save_hits(self) -> None:
@@ -174,6 +201,8 @@ class Store:
                     "updated": item.updated,
                     "md5": item.md5,
                     "frozen": "1" if item.frozen else "0",
+                    "chars": item.chars,
+                    "prefix": item.prefix,
                 })
 
     def save_allow(self) -> None:
@@ -186,6 +215,22 @@ class Store:
                 writer.writerow({
                     "path": item.path,
                     "note": item.note,
+                })
+
+    def save_presets(self) -> None:
+        from .presets import PRESET_ORDER, default_enabled
+
+        os.makedirs(self.data_dir, exist_ok=True)
+        flags = default_enabled()
+        flags.update(self.preset_flags)
+        self.preset_flags = flags
+        with open(self.presets_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=PRESETS_FIELDS)
+            writer.writeheader()
+            for name in PRESET_ORDER:
+                writer.writerow({
+                    "name": name,
+                    "enabled": "1" if flags.get(name) else "0",
                 })
 
     def save_state(self) -> None:
@@ -217,11 +262,36 @@ class Store:
         existing.add(when, status, ip)
         return False
 
+    def enabled_presets(self) -> dict[str, bool]:
+        from .presets import default_enabled
+
+        flags = default_enabled()
+        flags.update(self.preset_flags)
+        return flags
+
     def unmarked_hits(self) -> list[Hit]:
+        from .presets import covers_path
+
+        enabled = self.enabled_presets()
         return [
             h for h in self.hits.values()
-            if h.path not in self.ruled and h.path not in self.allow
+            if h.path not in self.ruled
+            and h.path not in self.allow
+            and not covers_path(h.path, enabled)
         ]
+
+    def preset_hits(self) -> list[Hit]:
+        from .presets import covers_path
+
+        enabled = self.enabled_presets()
+        return [h for h in self.hits.values() if covers_path(h.path, enabled)]
+
+    def set_preset(self, name: str, enabled: bool) -> None:
+        from .presets import PRESETS
+
+        if name not in PRESETS:
+            raise ValueError(f"Unknown preset: {name}")
+        self.preset_flags[name] = enabled
 
     def top_unmarked(self, n: int) -> list[Hit]:
         hits = self.unmarked_hits()
@@ -238,10 +308,14 @@ class Store:
         return True
 
     def mark_ruled(self, paths: list[str], rule_name: str, when: Optional[datetime] = None) -> int:
+        from .presets import covers_path
+
         stamped = (when or datetime.now(timezone.utc)).isoformat()
         added = 0
         for path in paths:
             if path in self.ruled or path in self.allow:
+                continue
+            if covers_path(path, self.enabled_presets()):
                 continue
             hit = self.hits.get(path)
             self.ruled[path] = Ruled(
@@ -270,9 +344,31 @@ class Store:
                 updated=br.updated,
                 md5=br.md5,
                 frozen=br.frozen,
+                prefix=br.prefix,
+                chars=br.chars,
             )
             added += self.mark_ruled(br.paths, br.name, stamped)
+        self.save_rule_outputs(botrules)
         return added
+
+    def save_rule_outputs(self, botrules: list) -> None:
+        """Write paste-ready expressions so open rules can grow across runs."""
+        from .rule import MAX_EXPR, BotRule
+
+        outdir = os.path.join(self.data_dir, "rules")
+        os.makedirs(outdir, exist_ok=True)
+        for br in botrules:
+            if not isinstance(br, BotRule):
+                continue
+            path = os.path.join(outdir, f"{br.name}.txt")
+            status = "FROZEN" if br.frozen else "OPEN"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(f"# {br.cloudflare_name}\n")
+                handle.write(
+                    f"# {br.chars}/{MAX_EXPR} chars  {len(br.paths)} paths  {status}\n"
+                )
+                handle.write(br.expression)
+                handle.write("\n")
 
     def load_botrules(self) -> list:
         from .rule import BotRule, rule_number
@@ -298,6 +394,7 @@ class Store:
                 updated=meta.updated if meta else "",
                 frozen=meta.frozen if meta else False,
                 prev_md5=meta.md5 if meta else "",
+                prefix=meta.prefix if meta else "",
             ))
         result.sort(key=lambda r: r.number)
         return result
@@ -370,6 +467,8 @@ def _read_rules(path: str) -> dict[str, RuleMeta]:
                 updated=row.get("updated") or "",
                 md5=row.get("md5") or "",
                 frozen=frozen,
+                prefix=row.get("prefix") or "",
+                chars=int(row.get("chars") or 0) if (row.get("chars") or "").isdigit() else 0,
             )
     return rules
 
@@ -385,6 +484,22 @@ def _read_allow(path: str) -> dict[str, Allowed]:
                 continue
             allow[p] = Allowed(path=p, note=row.get("note") or "")
     return allow
+
+
+def _read_preset_flags(path: str) -> dict[str, bool]:
+    from .presets import PRESETS, default_enabled
+
+    flags = default_enabled()
+    if not os.path.isfile(path):
+        return flags
+    with open(path, newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            name = (row.get("name") or "").strip()
+            if name not in PRESETS:
+                continue
+            raw = (row.get("enabled") or "").strip().lower()
+            flags[name] = raw in ("1", "true", "yes", "on")
+    return flags
 
 
 def _read_watermarks(path: str) -> dict[str, FileWatermark]:

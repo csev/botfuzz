@@ -1,5 +1,4 @@
-data/*.csv
-data/*.json
+data/state.json
 __pycache__/
 *.py[cod]
 .DS_Store

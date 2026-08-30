@@ -18,6 +18,16 @@ from .rule import (
     print_one_rule,
     print_rule_list,
 )
+from .presets import (
+    PRESET_ORDER,
+    PRESETS,
+    covers_not_wordpress,
+    covers_obvious_bad,
+    default_enabled,
+    preset_prefix,
+    print_enabled_presets,
+    print_preset,
+)
 from .scan import resolve_access_files, scan_files
 
 
@@ -74,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--per-rule",
         type=int,
         default=DEFAULT_PER_RULE,
-        help=f"Max paths per named rule before it freezes (default {DEFAULT_PER_RULE})",
+        help="Optional extra path-count cap per named rule (default 0: grow until ~4k characters)",
     )
     rule.add_argument(
         "--mark",
@@ -92,6 +102,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help="Reprint every named rule (recovery); skip if MD5 matches Cloudflare",
+    )
+    rule.add_argument(
+        "--presets",
+        action="store_true",
+        help="Show preset expressions (these are prepended to botfuzz-1, not separate Cloudflare rules)",
+    )
+    rule.add_argument(
+        "--not-wordpress",
+        action="store_true",
+        help="Print the static not-WordPress preset",
+    )
+    rule.add_argument(
+        "--obvious-bad",
+        action="store_true",
+        help="Print the static obvious-bad preset (.git, .env, cgi-bin)",
+    )
+
+    preset = sub.add_parser("preset", help="Enable or disable paste-ready preset rules")
+    preset.add_argument(
+        "name",
+        nargs="?",
+        help="Preset name: obvious-bad or not-wordpress",
+    )
+    preset.add_argument(
+        "state",
+        nargs="?",
+        choices=("on", "off"),
+        help="Turn the preset on or off (writes data/presets.csv)",
     )
 
     allow = sub.add_parser(
@@ -173,6 +211,18 @@ def self_test() -> int:
     if not grown[1].changed or not grown[1].frozen or len(grown[1].paths) != 2:
         print("FAIL expected botfuzz-2 to fill, change, and freeze")
         return 1
+    pref = preset_prefix(default_enabled())
+    with_preset = assign_new([], ["/shell.php"], per_rule=30, today="2026-08-30", prefix=pref)
+    if "/.git" not in with_preset[0].expression or "/shell.php" not in with_preset[0].expression:
+        print("FAIL botfuzz-1 should start with presets and include residue paths")
+        return 1
+    if with_preset[0].number != 1 or "/.svn" in with_preset[0].paths:
+        print("FAIL presets must not be stored as exact paths")
+        return 1
+    growing = assign_new([], ["/a", "/b", "/c"], per_rule=0, today="2026-08-30")
+    if len(growing) != 1 or growing[0].frozen:
+        print("FAIL without a path cap, one rule should stay open until ~4k")
+        return 1
     store = Store("/unused")
     store.hits["/keep"] = Hit(path="/keep", count=2)
     store.hits["/skip"] = Hit(path="/skip", count=9)
@@ -180,6 +230,28 @@ def self_test() -> int:
     unmarked = [h.path for h in store.unmarked_hits()]
     if unmarked != ["/keep"]:
         print(f"FAIL allow list should hide /skip, got {unmarked}")
+        return 1
+    if not covers_not_wordpress("/wp-admin/setup-config.php"):
+        print("FAIL expected /wp-admin to be not-wordpress")
+        return 1
+    if not covers_obvious_bad("/.git/config") or not covers_obvious_bad("/cgi-bin/foo"):
+        print("FAIL expected /.git and /cgi-bin to be obvious-bad")
+        return 1
+    if covers_not_wordpress("/shell.php") or covers_not_wordpress("/wrapper.php"):
+        print("FAIL did not expect /shell.php or /wrapper.php to be WordPress")
+        return 1
+    if covers_obvious_bad("/wp-admin/setup-config.php"):
+        print("FAIL WordPress paths should not be obvious-bad")
+        return 1
+    store.hits["/wp-login.php"] = Hit(path="/wp-login.php", count=99)
+    unmarked = [h.path for h in store.unmarked_hits()]
+    if "/wp-login.php" in unmarked:
+        print("FAIL WordPress paths should not go into generated rules")
+        return 1
+    store.preset_flags = {"obvious-bad": True, "not-wordpress": False}
+    unmarked = [h.path for h in store.unmarked_hits()]
+    if "/wp-login.php" not in unmarked:
+        print("FAIL disabling not-wordpress should surface /wp-login.php")
         return 1
     print("self-test ok")
     return 0
@@ -194,6 +266,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     stats = scan_files(store, files)
     print(f"Scanned {stats.files} file(s), skipped {stats.skipped_files} already-read")
     print(f"  {stats.lines} lines, {stats.parsed} parsed, {stats.probes} probes")
+    if stats.preset_probes:
+        print(f"  {stats.preset_probes} collapsed by presets (not counted in hits.csv)")
     print(f"  {stats.new_paths} new paths, {len(store.hits)} total in {store.hits_path}")
     return 0
 
@@ -214,10 +288,27 @@ def cmd_top(args: argparse.Namespace) -> int:
         print(f"... {remaining} more unmarked paths")
     if store.allow:
         print(f"({len(store.allow)} allow-listed path(s) omitted)")
+    covered = store.preset_hits()
+    if covered:
+        on = [n for n in PRESET_ORDER if store.enabled_presets().get(n)]
+        print(
+            f"({len(covered)} path(s) omitted — covered by presets: {', '.join(on)})"
+        )
     return 0
 
 
 def cmd_rule(args: argparse.Namespace) -> int:
+    if args.presets:
+        store = Store(args.data)
+        store.load()
+        print_enabled_presets(store.enabled_presets())
+        return 0
+    if args.not_wordpress:
+        print_preset(PRESETS["not-wordpress"])
+        return 0
+    if args.obvious_bad:
+        print_preset(PRESETS["obvious-bad"])
+        return 0
     store = Store(args.data)
     store.load()
     existing = store.load_botrules()
@@ -250,11 +341,12 @@ def cmd_rule(args: argparse.Namespace) -> int:
         usable = [p for p in paths if cloudflare_safe(p)]
         skipped = [p for p in paths if not cloudflare_safe(p)]
     today = datetime.now(timezone.utc).date().isoformat()
+    prefix = preset_prefix(store.enabled_presets())
 
-    if not usable and not args.freeze:
-        if not existing:
-            print("No unmarked probe paths in hits.csv")
-            return 0
+    if not usable and not args.freeze and not existing and not prefix:
+        print("No unmarked probe paths in hits.csv")
+        return 0
+    if not usable and not args.freeze and existing and not prefix:
         print_assignment(existing, skipped)
         return 0
 
@@ -264,6 +356,7 @@ def cmd_rule(args: argparse.Namespace) -> int:
         per_rule=args.per_rule,
         today=today,
         freeze_last=args.freeze,
+        prefix=prefix,
     )
     print_assignment(updated, skipped)
     if args.mark or args.freeze:
@@ -273,6 +366,37 @@ def cmd_rule(args: argparse.Namespace) -> int:
         print(f"# saved {added} new path(s); rules in {store.rules_path}")
     elif any(r.changed for r in updated):
         print("# preview only — pass --mark to record these paths and names")
+    return 0
+
+
+def cmd_preset(args: argparse.Namespace) -> int:
+    store = Store(args.data)
+    store.load()
+    if not args.name:
+        flags = store.enabled_presets()
+        print(f"{'name':<16} {'on':<4}  md5")
+        for name in PRESET_ORDER:
+            preset = PRESETS[name]
+            on = "yes" if flags.get(name) else "no"
+            print(f"{name:<16} {on:<4}  {preset.md5}")
+            print(f"                 {preset.recommended}")
+        print(f"Config: {store.presets_path}")
+        print("Enabled presets are prepended to botfuzz-1 (not pasted as their own rules)")
+        return 0
+    if args.name not in PRESETS:
+        print(f"Unknown preset {args.name}. Choose: {', '.join(PRESET_ORDER)}")
+        return 1
+    if not args.state:
+        print_preset(PRESETS[args.name])
+        flags = store.enabled_presets()
+        print(f"# enabled in config: {'yes' if flags.get(args.name) else 'no'}")
+        return 0
+    enabled = args.state == "on"
+    if args.name == "obvious-bad" and not enabled:
+        print("warning: obvious-bad is recommended for every host")
+    store.set_preset(args.name, enabled)
+    store.save_presets()
+    print(f"{args.name} {'on' if enabled else 'off'} in {store.presets_path}")
     return 0
 
 
@@ -317,6 +441,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_top(args)
     if args.cmd == "rule":
         return cmd_rule(args)
+    if args.cmd == "preset":
+        return cmd_preset(args)
     if args.cmd == "allow":
         return cmd_allow(args)
     build_parser().error(f"unknown command {args.cmd}")
