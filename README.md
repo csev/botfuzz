@@ -49,10 +49,14 @@ Presets collapse whole families. What is left in `top` is residue: some of
 it is junk to block, and some of it is a real URL that 404'd. Look at a
 small batch and categorize **each** path.
 
+    ./botfuzz top --interactive          # default 10; a=allow b=block other=skip
+
+Or one path at a time from a printed list:
+
     ./botfuzz top -n 10
-    ./botfuzz allow /real/path --note "why"     # must not be blocked
-    ./botfuzz block /about/function.php         # put this path in botfuzz-N
-    ./botfuzz top -n 10                         # next ten
+    ./botfuzz allow /real/path --note "why"
+    ./botfuzz block /about/function.php
+    ./botfuzz top -n 10
 
 `block` writes the open named rule immediately (same CSVs as `--mark`).
 Paste the printed expression into Cloudflare when it changes. Repeat until

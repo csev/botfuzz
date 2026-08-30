@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 from datetime import datetime, timezone
 
@@ -76,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_BATCH,
         help=f"How many paths (default {DEFAULT_BATCH})",
+    )
+    top.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="For each path: a=allow, b=block, anything else=skip",
     )
 
     rule = sub.add_parser(
@@ -393,9 +400,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if stats.preset_probes:
         print(f"  {stats.preset_probes} collapsed by presets (not counted in hits.csv)")
     print(f"  {stats.new_paths} new paths, {len(store.hits)} total in {store.hits_path}")
-    print(f"Next: ./botfuzz top -n {DEFAULT_BATCH}")
-    print("For each path:  ./botfuzz allow PATH --note \"...\"  or  ./botfuzz block PATH")
-    print("Then top again.")
+    print(f"Next: ./botfuzz top -n {DEFAULT_BATCH} --interactive")
+    print("a=allow  b=block  anything else=skip")
     return 0
 
 
@@ -406,6 +412,8 @@ def cmd_top(args: argparse.Namespace) -> int:
     if not hits:
         print("No unmarked probe paths in hits.csv")
         return 0
+    if args.interactive:
+        return cmd_top_interactive(store, hits)
     width = max(len(str(h.count)) for h in hits)
     print(f"{'count':>{width}}  path")
     for hit in hits:
@@ -425,8 +433,50 @@ def cmd_top(args: argparse.Namespace) -> int:
         print(
             f"({len(covered)} path(s) omitted — covered by presets: {', '.join(on)})"
         )
-    print(f"For each path:  ./botfuzz allow PATH --note \"...\"  or  ./botfuzz block PATH")
-    print(f"Then: ./botfuzz top -n {args.n}")
+    print(f"Interactive: ./botfuzz top -n {args.n} --interactive")
+    print("  a=allow  b=block  anything else=skip")
+    return 0
+
+
+def cmd_top_interactive(store: Store, hits: list[Hit]) -> int:
+    if not sys.stdin.isatty():
+        print("top --interactive needs a terminal", file=sys.stderr)
+        return 1
+    width = max(len(str(h.count)) for h in hits)
+    n = len(hits)
+    allowed_n = 0
+    skipped_n = 0
+    to_block: list[str] = []
+    print("a=allow  b=block  anything else=skip  (Ctrl-C finishes and saves blocks)")
+    try:
+        for i, hit in enumerate(hits, start=1):
+            print(f"{i}/{n}  {hit.count:>{width}}  {hit.path}")
+            try:
+                raw = input("  [a/b/skip] ").strip().lower()
+            except EOFError:
+                print()
+                break
+            if raw == "a":
+                if hit.path in store.ruled:
+                    print(
+                        f"  warning: already in {store.ruled[hit.path].rule}; "
+                        "allow does not rewrite a frozen Cloudflare rule"
+                    )
+                store.add_allow(hit.path, "")
+                store.save_allow()
+                allowed_n += 1
+                print(f"  allowed {hit.path}")
+            elif raw == "b":
+                to_block.append(hit.path)
+                print(f"  will block {hit.path}")
+            else:
+                skipped_n += 1
+                print("  skipped")
+    except KeyboardInterrupt:
+        print("\n(stopped)")
+    print(f"Allowed {allowed_n}, queued to block {len(to_block)}, skipped {skipped_n}")
+    if to_block:
+        return apply_blocks(store, to_block)
     return 0
 
 
@@ -571,7 +621,7 @@ def cmd_allow(args: argparse.Namespace) -> int:
             "frozen Cloudflare rules are not rewritten. "
             "Allow list only prevents new assignments."
         )
-        return 0
+    return 0
 
 
 def _norm_path(path: str) -> str:
@@ -580,15 +630,13 @@ def _norm_path(path: str) -> str:
     return path
 
 
-def cmd_block(args: argparse.Namespace) -> int:
-    """Categorize specific paths as block: add them to the open named rule."""
-    store = Store(args.data)
-    store.load()
+def apply_blocks(store: Store, paths: list[str]) -> int:
+    """Add exact paths to the open named rule and print paste text."""
     enabled = store.enabled_presets()
     existing = store.load_botrules()
     usable: list[str] = []
     skipped: list[str] = []
-    for raw in args.paths:
+    for raw in paths:
         path = _norm_path(raw)
         if is_allowed(path, store.allow):
             print(f"# skip {path} — on the allow list")
@@ -624,6 +672,12 @@ def cmd_block(args: argparse.Namespace) -> int:
     store.save_rules()
     print(f"# saved {added} new path(s); rules in {store.rules_path}")
     return 0
+
+
+def cmd_block(args: argparse.Namespace) -> int:
+    store = Store(args.data)
+    store.load()
+    return apply_blocks(store, args.paths)
 
 
 def main(argv: list[str] | None = None) -> int:
