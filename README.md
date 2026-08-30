@@ -118,6 +118,9 @@ What counts as a probe
 
 Same idea as the Tsugi Apache scanner: 400/403/404 on paths like `.git`,
 `.env`, `wp-admin`, phpmyadmin, lonely `/*.php`, and similar junk. Ordinary
-404s (a mistyped real page) are ignored.
+404s (a mistyped real page) are ignored. Common real pages such as
+`index.php`, `about.php`, `contact.php`, and `privacy.php` are never
+treated as probes (any directory). Names like `admin.php` and `1.php`
+still count.
 
     ./botfuzz scan --self-test

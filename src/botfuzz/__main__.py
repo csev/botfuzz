@@ -173,6 +173,26 @@ def self_test() -> int:
             '404 123 "-" "curl/8.0"',
             True,
         ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /about.php HTTP/1.1" '
+            '404 123 "-" "Mozilla/5.0"',
+            False,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /index.php HTTP/1.1" '
+            '404 123 "-" "Mozilla/5.0"',
+            False,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /blog/index.php HTTP/1.1" '
+            '404 123 "-" "Mozilla/5.0"',
+            False,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] "GET /admin.php HTTP/1.1" '
+            '404 123 "-" "curl/8.0"',
+            True,
+        ),
     ]
     failed = 0
     for raw, expect in cases:

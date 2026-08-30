@@ -271,6 +271,7 @@ class Store:
 
     def unmarked_hits(self) -> list[Hit]:
         from .presets import covers_path
+        from .probes import is_legit_path
 
         enabled = self.enabled_presets()
         return [
@@ -278,6 +279,7 @@ class Store:
             if h.path not in self.ruled
             and h.path not in self.allow
             and not covers_path(h.path, enabled)
+            and not is_legit_path(h.path)
         ]
 
     def preset_hits(self) -> list[Hit]:
@@ -309,6 +311,7 @@ class Store:
 
     def mark_ruled(self, paths: list[str], rule_name: str, when: Optional[datetime] = None) -> int:
         from .presets import covers_path
+        from .probes import is_legit_path
 
         stamped = (when or datetime.now(timezone.utc)).isoformat()
         added = 0
@@ -316,6 +319,8 @@ class Store:
             if path in self.ruled or path in self.allow:
                 continue
             if covers_path(path, self.enabled_presets()):
+                continue
+            if is_legit_path(path):
                 continue
             hit = self.hits.get(path)
             self.ruled[path] = Ruled(
