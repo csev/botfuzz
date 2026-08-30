@@ -51,6 +51,7 @@ it is junk to block, and some of it is a real URL that 404'd. Look at a
 small batch and categorize **each** path.
 
     ./botfuzz top --interactive          # default 10; a=allow b=queue-block other=skip
+    ./botfuzz top -n 20 --interactive    # a different batch size
     ./botfuzz emit                       # regenerate Cloudflare paste from latest
 
 `block` / interactive **b** only queues paths (`data/pending.csv`). They are
