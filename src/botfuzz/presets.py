@@ -1,4 +1,4 @@
-"""Paste-ready preset Cloudflare rules: obvious-bad (always) and not-wordpress."""
+"""Paste-ready preset Cloudflare rules, OR'd onto the front of botfuzz-1."""
 
 from __future__ import annotations
 
@@ -6,17 +6,23 @@ import hashlib
 from dataclasses import dataclass
 from typing import Callable
 
+from .probes import LEGIT_BASENAMES, is_legit_path, is_root_php
+
 OBVIOUS_BAD_EXPRESSION = """\
 (http.request.uri.path contains "/.git") or
 (http.request.uri.path contains "/.svn") or
 (http.request.uri.path contains "/.htpasswd") or
 (http.request.uri.path contains "/.env") or
-(http.request.uri.path contains "/cgi-bin")"""
+(http.request.uri.path contains "/cgi-bin") or
+(http.request.uri.path contains "/graphql") or
+(http.request.uri.path contains ".vite/manifest.json") or
+(http.request.uri.path in {"/build/manifest.json" "/dist/manifest.json"}) or
+(http.request.uri.path contains "/.well-known/" and lower(http.request.uri.path) contains ".php")"""
 
 NOT_WORDPRESS_EXPRESSION = """\
 (starts_with(http.request.uri.path, "/wp-")) or
 (starts_with(http.request.uri.path, "/wp/")) or
-(http.request.uri.path in {"/wp" "/wordpress" "/wordpress/"}) or
+(http.request.uri.path in {"/wp" "/wp.php" "/wordpress" "/wordpress/"}) or
 (http.request.uri.path contains "/wp-admin") or
 (http.request.uri.path contains "/wp-login") or
 (http.request.uri.path contains "/wp-content") or
@@ -26,8 +32,22 @@ NOT_WORDPRESS_EXPRESSION = """\
 (http.request.uri.path contains "xmlrpc.php") or
 (http.request.uri.path contains "/wordpress/")"""
 
+# Cloudflare `matches` is RE2; keep this under their ~64-char regex budget.
+_ROOT_PHP_RE = r"^/[^/]+\.(php[0-9]?|phtml|phar)$"
+
+
+def _root_php_expression() -> str:
+    inner = " ".join(f'"/{name}"' for name in sorted(LEGIT_BASENAMES))
+    return (
+        f'(lower(http.request.uri.path) matches "{_ROOT_PHP_RE}") and not '
+        f"(lower(http.request.uri.path) in {{{inner}}})"
+    )
+
+
+ROOT_PHP_EXPRESSION = _root_php_expression()
+
 _OBVIOUS_CONTAINS = ("/.git", "/.svn", "/.htpasswd", "/.env", "/cgi-bin")
-_WP_EXACT = {"/wp", "/wordpress", "/wordpress/"}
+_WP_EXACT = {"/wp", "/wp.php", "/wordpress", "/wordpress/"}
 _WP_STARTS = ("/wp-", "/wp/")
 _WP_CONTAINS = (
     "/wp-admin",
@@ -48,7 +68,18 @@ def _ci(path: str, pred: Callable[[str], bool]) -> bool:
 def covers_obvious_bad(path: str) -> bool:
     if not path:
         return False
-    return _ci(path, lambda p: any(n in p for n in _OBVIOUS_CONTAINS))
+    lowered = path.lower()
+    if any(n in path or n in lowered for n in _OBVIOUS_CONTAINS):
+        return True
+    if "graphql" in lowered:
+        return True
+    if ".vite/manifest.json" in lowered:
+        return True
+    if lowered in ("/build/manifest.json", "/dist/manifest.json"):
+        return True
+    if "/.well-known/" in lowered and ".php" in lowered:
+        return True
+    return False
 
 
 def covers_not_wordpress(path: str) -> bool:
@@ -61,6 +92,12 @@ def covers_not_wordpress(path: str) -> bool:
         return any(n in p for n in _WP_CONTAINS)
 
     return _ci(path, pred)
+
+
+def covers_root_php(path: str) -> bool:
+    if not path or is_legit_path(path):
+        return False
+    return is_root_php(path)
 
 
 @dataclass(frozen=True)
@@ -84,10 +121,10 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     "obvious-bad": Preset(
         name="obvious-bad",
-        label="Obvious bad stuff (.git, .svn, .env, .htpasswd, cgi-bin)",
+        label="Obvious bad stuff (.git, .svn, .env, graphql, vite manifests, …)",
         expression=OBVIOUS_BAD_EXPRESSION,
         default_enabled=True,
-        recommended="Leave this on. Nobody should serve .git or .htpasswd.",
+        recommended="Leave this on. Nobody should serve .git, GraphQL, or leaked Vite manifests.",
         covers=covers_obvious_bad,
     ),
     "not-wordpress": Preset(
@@ -95,12 +132,23 @@ PRESETS: dict[str, Preset] = {
         label="I am not WordPress",
         expression=NOT_WORDPRESS_EXPRESSION,
         default_enabled=True,
-        recommended="Turn this off if the host actually runs WordPress.",
+        recommended="Turn this off if the host actually runs WordPress (also turn off root-php).",
         covers=covers_not_wordpress,
+    ),
+    "root-php": Preset(
+        name="root-php",
+        label="No PHP at the document root except brochure pages (index.php, about.php, …)",
+        expression=ROOT_PHP_EXPRESSION,
+        default_enabled=True,
+        recommended=(
+            "Leave this on if the only PHP at / is pages like index.php / about.php. "
+            "Turn it off if you serve other PHP files at the document root."
+        ),
+        covers=covers_root_php,
     ),
 }
 
-PRESET_ORDER = ("obvious-bad", "not-wordpress")
+PRESET_ORDER = ("obvious-bad", "not-wordpress", "root-php")
 
 
 def default_enabled() -> dict[str, bool]:

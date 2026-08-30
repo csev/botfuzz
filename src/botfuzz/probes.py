@@ -1,7 +1,4 @@
-"""Silly URL patterns that are almost never legitimate on these hosts.
-
-Copied from tsugi-build/tools/apache_scan/rules.py (access probe path).
-"""
+"""Silly URL patterns that are almost never legitimate on a real site."""
 
 from __future__ import annotations
 
@@ -9,7 +6,7 @@ import re
 
 from .parse import Event
 
-# Path fragments that are almost never legitimate on these Tsugi hosts.
+# Scanner / leak path fragments (secrets, CMS probes, debug endpoints).
 ACCESS_PROBE_PATH = re.compile(
     r"(?i)("
     r"\.env|\.git|wp-admin|wp-login|wp-content|wp-includes|wp-json|"
@@ -27,12 +24,8 @@ ACCESS_PROBE_PATH = re.compile(
     r")"
 )
 
-# Single-segment PHP files on the default host are webshell/probe names.
-LONELY_PHP = re.compile(r"^/[^/]+\.php$", re.I)
 PHP_EXT = re.compile(r"\.(?:php[0-9]?|phtml|phar)$", re.I)
-APP_PREFIX = re.compile(
-    r"(?i)^/(tsugi|tools|mod|assn|lessons|code\d*|lectures\d*|assignments)/"
-)
+ROOT_PHP = re.compile(r"^/[^/]+\.(?:php[0-9]?|phtml|phar)$", re.I)
 
 PROBE_STATUS = (400, 403, 404)
 
@@ -95,6 +88,11 @@ def is_legit_path(path: str) -> bool:
     return base in LEGIT_BASENAMES
 
 
+def is_root_php(path: str) -> bool:
+    """Single-segment PHP at the document root (webshell/probe names)."""
+    return bool(path and ROOT_PHP.match(path))
+
+
 def is_probe(event: Event) -> bool:
     """True if this access event is a scanner path worth tracking."""
     if event.garbage:
@@ -108,10 +106,8 @@ def is_probe(event: Event) -> bool:
         return False
     if ACCESS_PROBE_PATH.search(path):
         return True
-    if path.startswith("/.") and event.status in PROBE_STATUS:
+    if path.startswith("/."):
         return True
-    if PHP_EXT.search(path) and not APP_PREFIX.match(path):
-        return True
-    if LONELY_PHP.match(path):
+    if PHP_EXT.search(path):
         return True
     return False

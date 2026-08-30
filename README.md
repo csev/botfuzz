@@ -13,8 +13,13 @@ the front of **botfuzz-1** so they do not burn a whole 4K slot. They also
 collapse whole families (every `.svn` URL, every `.git` URL) to one matcher,
 and those hits are not counted in `hits.csv`.
 
-1. **obvious-bad** — always on. `.git`, `.svn`, `.htpasswd`, `.env`, `cgi-bin`.
-2. **not-wordpress** — on by default. Turn off if the host runs WordPress.
+1. **obvious-bad** — always on. `.git`, `.svn`, `.htpasswd`, `.env`, `cgi-bin`,
+   GraphQL, Vite/build `manifest.json`, and PHP under `/.well-known/`.
+2. **not-wordpress** — on by default. Turn off if the host runs WordPress
+   (and turn off **root-php** as well).
+3. **root-php** — on by default. Blocks `/*.php` at the document root except
+   brochure pages (`index.php`, `about.php`, `contact.php`, …). Turn off if
+   you serve other PHP files at `/`.
 
     ./botfuzz preset                     # on/off (writes data/presets.csv)
     ./botfuzz preset not-wordpress off
@@ -116,11 +121,11 @@ WordPress blocking off. Then scan their own logs and grow their own botfuzz-1.
 What counts as a probe
 ----------------------
 
-Same idea as the Tsugi Apache scanner: 400/403/404 on paths like `.git`,
-`.env`, `wp-admin`, phpmyadmin, lonely `/*.php`, and similar junk. Ordinary
-404s (a mistyped real page) are ignored. Common real pages such as
-`index.php`, `about.php`, `contact.php`, and `privacy.php` are never
-treated as probes (any directory). Names like `admin.php` and `1.php`
-still count.
+400/403/404 on scanner paths (`.git`, `.env`, `wp-admin`, phpmyadmin, …)
+and on PHP files, except common page names such as `index.php`,
+`about.php`, `contact.php`, and `privacy.php` (any directory). Names like
+`admin.php` and `1.php` still count. Ordinary 404s on HTML or other
+non-PHP paths are ignored. Use the allow list if a real PHP URL is being
+miscounted.
 
     ./botfuzz scan --self-test
