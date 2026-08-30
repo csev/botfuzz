@@ -26,7 +26,6 @@ from .presets import (
     covers_not_wordpress,
     covers_obvious_bad,
     covers_path,
-    covers_root_php,
     default_enabled,
     preset_prefix,
     print_enabled_presets,
@@ -139,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     preset.add_argument(
         "name",
         nargs="?",
-        help="Preset name: obvious-bad, not-wordpress, or root-php",
+        help="Preset name: obvious-bad or not-wordpress",
     )
     preset.add_argument(
         "state",
@@ -354,42 +353,23 @@ def self_test() -> int:
     if not covers_obvious_bad("/actuator/env"):
         print("FAIL expected /actuator/env to be obvious-bad")
         return 1
-    if not covers_root_php("/1.php") or not covers_root_php("/goat.php") or not covers_root_php("/ioxi002.PhP7"):
-        print("FAIL expected lonely PHP to be root-php")
-        return 1
-    if covers_root_php("/about.php") or covers_root_php("/index.php"):
-        print("FAIL brochure pages must not be root-php")
-        return 1
-    pref = preset_prefix(default_enabled())
-    if "/newsletter.php" in pref:
-        print("FAIL Cloudflare root-php must not except names we have never seen")
-        return 1
-    if "/index.php" not in pref or "/about.php" not in pref:
-        print("FAIL Cloudflare root-php should except index.php and about.php")
-        return 1
-    if covers_root_php("/about/function.php") or covers_root_php("/blog/post.php"):
-        print("FAIL nested PHP must not be root-php")
-        return 1
     store.hits["/wp-login.php"] = Hit(path="/wp-login.php", count=99)
     store.hits["/wp-admin/setup-config.php"] = Hit(path="/wp-admin/setup-config.php", count=50)
     unmarked = [h.path for h in store.unmarked_hits()]
     if "/wp-login.php" in unmarked or "/wp-admin/setup-config.php" in unmarked:
         print("FAIL WordPress paths should not go into generated rules")
         return 1
-    store.preset_flags = {"obvious-bad": True, "not-wordpress": False, "root-php": True}
+    store.preset_flags = {"obvious-bad": True, "not-wordpress": False}
     unmarked = [h.path for h in store.unmarked_hits()]
-    if "/wp-login.php" in unmarked:
-        print("FAIL root-php should still hide /wp-login.php when not-wordpress is off")
-        return 1
-    if "/wp-admin/setup-config.php" not in unmarked:
-        print("FAIL disabling not-wordpress should surface nested /wp-admin paths")
+    if "/wp-login.php" not in unmarked or "/wp-admin/setup-config.php" not in unmarked:
+        print("FAIL disabling not-wordpress should surface WordPress paths")
         return 1
     store.hits["/1.php"] = Hit(path="/1.php", count=20)
     store.hits["/about/function.php"] = Hit(path="/about/function.php", count=12)
-    store.preset_flags = {"obvious-bad": True, "not-wordpress": True, "root-php": True}
+    store.preset_flags = {"obvious-bad": True, "not-wordpress": True}
     unmarked = [h.path for h in store.unmarked_hits()]
-    if "/1.php" in unmarked:
-        print("FAIL root-php should hide /1.php")
+    if "/1.php" not in unmarked:
+        print("FAIL lonely PHP should be residue")
         return 1
     if "/about/function.php" not in unmarked:
         print("FAIL nested PHP should still be residue")

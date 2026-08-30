@@ -25,7 +25,6 @@ ACCESS_PROBE_PATH = re.compile(
 )
 
 PHP_EXT = re.compile(r"\.(?:php[0-9]?|phtml|phar)$", re.I)
-ROOT_PHP = re.compile(r"^/[^/]+\.(?:php[0-9]?|phtml|phar)$", re.I)
 
 # Silly/scanner URLs: 403 is still a probe (.git forbidden, WAF, etc.).
 SCANNER_STATUS = (400, 403, 404)
@@ -89,11 +88,6 @@ def is_legit_path(path: str) -> bool:
         return False
     base = path.rsplit("/", 1)[-1].split("?")[0].lower()
     return base in LEGIT_BASENAMES
-
-
-def is_root_php(path: str) -> bool:
-    """Single-segment PHP at the document root (webshell/probe names)."""
-    return bool(path and ROOT_PHP.match(path))
 
 
 def is_scanner_path(path: str) -> bool:

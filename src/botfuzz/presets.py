@@ -6,8 +6,6 @@ import hashlib
 from dataclasses import dataclass
 from typing import Callable
 
-from .probes import is_legit_path, is_root_php
-
 OBVIOUS_BAD_EXPRESSION = """\
 (http.request.uri.path contains "/.git") or
 (http.request.uri.path contains "/.svn") or
@@ -33,28 +31,6 @@ NOT_WORDPRESS_EXPRESSION = """\
 (http.request.uri.path contains "/wp/") or
 (http.request.uri.path contains "xmlrpc.php") or
 (http.request.uri.path contains "/wordpress/")"""
-
-# Cloudflare `matches` is RE2; keep this under their ~64-char regex budget.
-_ROOT_PHP_RE = r"^/[^/]+\.(php[0-9]?|phtml|phar)$"
-
-# Only pages a host commonly serves at /. Not the full probe-ignore list.
-ROOT_PHP_KEEP = frozenset({
-    "index.php",
-    "home.php",
-    "about.php",
-    "contact.php",
-})
-
-
-def root_php_expression() -> str:
-    inner = " ".join(f'"/{name}"' for name in sorted(ROOT_PHP_KEEP))
-    return (
-        f'(lower(http.request.uri.path) matches "{_ROOT_PHP_RE}") and not '
-        f"(lower(http.request.uri.path) in {{{inner}}})"
-    )
-
-
-ROOT_PHP_EXPRESSION = root_php_expression()
 
 _OBVIOUS_CONTAINS = ("/.git", "/.svn", "/.htpasswd", "/.env", "/cgi-bin")
 _WP_EXACT = {"/wp", "/wp.php", "/wordpress", "/wordpress/"}
@@ -107,12 +83,6 @@ def covers_not_wordpress(path: str) -> bool:
     return _ci(path, pred)
 
 
-def covers_root_php(path: str) -> bool:
-    if not path or is_legit_path(path):
-        return False
-    return is_root_php(path)
-
-
 @dataclass(frozen=True)
 class Preset:
     name: str
@@ -145,25 +115,12 @@ PRESETS: dict[str, Preset] = {
         label="I am not WordPress",
         expression=NOT_WORDPRESS_EXPRESSION,
         default_enabled=True,
-        recommended="Turn this off if the host actually runs WordPress (also turn off root-php).",
+        recommended="Turn this off if the host actually runs WordPress.",
         covers=covers_not_wordpress,
-    ),
-    "root-php": Preset(
-        name="root-php",
-        label="No PHP at the document root except index.php / about.php / contact.php / home.php",
-        expression=ROOT_PHP_EXPRESSION,
-        default_enabled=True,
-        recommended=(
-            "Blocks /foo.php at document root except index.php, about.php, "
-            "contact.php, and home.php. Allow-listed paths stay out of residue "
-            "rules; they are not copied into Cloudflare. Turn off if you serve "
-            "other PHP at /."
-        ),
-        covers=covers_root_php,
     ),
 }
 
-PRESET_ORDER = ("obvious-bad", "not-wordpress", "root-php")
+PRESET_ORDER = ("obvious-bad", "not-wordpress")
 
 
 def default_enabled() -> dict[str, bool]:

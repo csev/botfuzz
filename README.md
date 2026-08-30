@@ -16,12 +16,7 @@ and those hits are not counted in `hits.csv`.
 
 1. **obvious-bad** — always on. `.git`, `.svn`, `.htpasswd`, `.env`, `cgi-bin`,
    GraphQL, Vite/build `manifest.json`, and PHP under `/.well-known/`.
-2. **not-wordpress** — on by default. Turn off if the host runs WordPress
-   (and turn off **root-php** as well).
-3. **root-php** — on by default. Blocks `/*.php` at the document root except
-   `index.php`, `about.php`, `contact.php`, and `home.php`. Turn off if you
-   serve other PHP files at `/`. The allow list is **not** copied into
-   Cloudflare; it only keeps those paths out of residue `in { … }` lists.
+2. **not-wordpress** — on by default. Turn off if the host runs WordPress.
 
     ./botfuzz preset                     # on/off (writes data/presets.csv)
     ./botfuzz preset not-wordpress off
@@ -158,9 +153,6 @@ not a probe. Common page names such as `index.php`, `about.php`,
 `contact.php`, and `privacy.php` are never probes (any directory). Names
 like `admin.php` and `1.php` still count when they 404. Ordinary 404s on
 HTML or other non-PHP paths are ignored. Use the allow list if a real
-PHP URL is being miscounted. The Cloudflare **root-php** block only excepts
-`index.php` / `about.php` / `contact.php` / `home.php`. Other common names
-are ignored in `top` but still blocked at the edge if a scanner requests
-them. The allow list is never pasted into Cloudflare.
+PHP URL is being miscounted. The allow list is never pasted into Cloudflare.
 
     ./botfuzz scan --self-test
