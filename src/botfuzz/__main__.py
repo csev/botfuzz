@@ -329,6 +329,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     if stats.preset_probes:
         print(f"  {stats.preset_probes} collapsed by presets (not counted in hits.csv)")
     print(f"  {stats.new_paths} new paths, {len(store.hits)} total in {store.hits_path}")
+    print("Next: ./botfuzz top -n 30")
+    print("Allow anything that must not be blocked, then top -n 30 again.")
+    print("When the list is all junk: ./botfuzz rule -n 30 --mark")
     return 0
 
 
@@ -354,6 +357,11 @@ def cmd_top(args: argparse.Namespace) -> int:
         print(
             f"({len(covered)} path(s) omitted — covered by presets: {', '.join(on)})"
         )
+    print(
+        f"Allow false positives: ./botfuzz allow /path --note \"...\""
+    )
+    print(f"Then: ./botfuzz top -n {args.n}   (again, until this list is all junk)")
+    print(f"Then: ./botfuzz rule -n {args.n} --mark")
     return 0
 
 
@@ -425,7 +433,10 @@ def cmd_rule(args: argparse.Namespace) -> int:
         store.save_rules()
         print(f"# saved {added} new path(s); rules in {store.rules_path}")
     elif any(r.changed for r in updated):
-        print("# preview only — pass --mark to record these paths and names")
+        print(
+            "# preview only — if any path should not be blocked, allow it, "
+            "run top again, then --mark"
+        )
     return 0
 
 
