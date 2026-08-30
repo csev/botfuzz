@@ -7,7 +7,7 @@ import os
 
 from datetime import datetime, timezone
 
-from .csvstore import Allowed, Hit, Store
+from .csvstore import Allowed, Hit, Store, is_allowed
 from .parse import parse_access_line
 from .probes import is_probe
 from .rule import (
@@ -135,9 +135,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     allow = sub.add_parser(
         "allow",
-        help="Never put a path into a Cloudflare rule (hand-edit data/allow.csv)",
+        help="Never put a path (or prefix ending in /) into a Cloudflare rule",
     )
-    allow.add_argument("path", nargs="?", help="Exact URL path (e.g. /manifest.json)")
+    allow.add_argument(
+        "path",
+        nargs="?",
+        help="Exact path, or a prefix ending in / (e.g. /app/ skips everything under it)",
+    )
     allow.add_argument("--note", default="", help="Optional reason")
     return parser
 
@@ -262,6 +266,15 @@ def self_test() -> int:
     if unmarked != ["/keep"]:
         print(f"FAIL allow list should hide /skip, got {unmarked}")
         return 1
+    store.hits["/app/lib/foo.php"] = Hit(path="/app/lib/foo.php", count=40)
+    store.allow["/app/"] = Allowed(path="/app/", note="application")
+    unmarked = [h.path for h in store.unmarked_hits()]
+    if "/app/lib/foo.php" in unmarked:
+        print("FAIL prefix allow /app/ should hide /app/lib/foo.php")
+        return 1
+    if "/keep" not in unmarked:
+        print("FAIL prefix allow should not hide /keep")
+        return 1
     if not covers_not_wordpress("/wp-admin/setup-config.php"):
         print("FAIL expected /wp-admin to be not-wordpress")
         return 1
@@ -279,6 +292,12 @@ def self_test() -> int:
         return 1
     if not covers_not_wordpress("/wp.php"):
         print("FAIL expected /wp.php to be not-wordpress")
+        return 1
+    if not covers_not_wordpress("/blog/wp/v2/posts"):
+        print("FAIL expected /blog/wp/v2/ to be not-wordpress")
+        return 1
+    if not covers_obvious_bad("/actuator/env"):
+        print("FAIL expected /actuator/env to be obvious-bad")
         return 1
     if not covers_root_php("/1.php") or not covers_root_php("/goat.php") or not covers_root_php("/ioxi002.PhP7"):
         print("FAIL expected lonely PHP to be root-php")
@@ -349,8 +368,12 @@ def cmd_top(args: argparse.Namespace) -> int:
     remaining = len(store.unmarked_hits()) - len(hits)
     if remaining > 0:
         print(f"... {remaining} more unmarked paths")
-    if store.allow:
-        print(f"({len(store.allow)} allow-listed path(s) omitted)")
+    allowed = [h for h in store.hits.values() if is_allowed(h.path, store.allow)]
+    if allowed:
+        print(
+            f"({len(allowed)} path(s) omitted — allow list, "
+            f"{len(store.allow)} exact/prefix rule(s))"
+        )
     covered = store.preset_hits()
     if covered:
         on = [n for n in PRESET_ORDER if store.enabled_presets().get(n)]
@@ -479,11 +502,13 @@ def cmd_allow(args: argparse.Namespace) -> int:
             print("Allow list is empty. Add a path or edit data/allow.csv:")
             print("path,note")
             print("/manifest.json,PWA clients fetch this")
+            print("/app/,application tree (trailing slash = prefix)")
             return 0
         width = max(len(a.path) for a in store.allow.values())
         print(f"{'path':<{width}}  note")
         for item in sorted(store.allow.values(), key=lambda a: a.path):
-            print(f"{item.path:<{width}}  {item.note}")
+            kind = "prefix" if item.path.endswith("/") else "exact"
+            print(f"{item.path:<{width}}  {item.note or kind}")
         return 0
     path = args.path
     if not path.startswith("/"):
@@ -491,10 +516,13 @@ def cmd_allow(args: argparse.Namespace) -> int:
     already_ruled = store.ruled.get(path)
     added = store.add_allow(path, args.note)
     store.save_allow()
+    kind = "prefix" if path.endswith("/") else "path"
     if added:
-        print(f"Allowed {path} in {store.allow_path}")
+        print(f"Allowed {kind} {path} in {store.allow_path}")
     else:
-        print(f"Updated {path} in {store.allow_path}")
+        print(f"Updated {kind} {path} in {store.allow_path}")
+    if path.endswith("/"):
+        print("Trailing slash: every path under this prefix is omitted from top/rule")
     if already_ruled:
         print(
             f"warning: this path is already in {already_ruled.rule}; "

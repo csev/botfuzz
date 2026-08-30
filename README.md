@@ -86,15 +86,20 @@ Allow list
 ----------
 
 A 404 can still look like a probe (e.g. `/manifest.json`) but be something
-you do not want Cloudflare to block. Exact paths in `data/allow.csv` stay
-in `hits.csv` so you can see them, but `top` and `rule` skip them.
+you do not want Cloudflare to block. Entries in `data/allow.csv` stay in
+`hits.csv` so you can see them, but `top` and `rule` skip them.
+
+- Exact path: `/manifest.json`
+- Prefix: `/app/` (trailing slash) skips every path under that tree
 
 ```
 path,note
 /manifest.json,PWA clients fetch this
+/app/,application
 ```
 
     ./botfuzz allow /manifest.json --note "PWA clients fetch this"
+    ./botfuzz allow /app/ --note "application"
     ./botfuzz allow                 # list
 
 Allowing a path does not pull it out of a frozen bot rule already in
@@ -109,7 +114,7 @@ over.
 
 - `hits.csv` — residue probe paths (presets are not counted): path, count, first_seen, last_seen, status, sample_ip
 - `presets.csv` — live on/off copy (restored from `presets.sample.csv` after a wipe)
-- `allow.csv` — paths that must never go into a Cloudflare rule: path, note
+- `allow.csv` — paths (or prefixes ending in `/`) that must never go into a Cloudflare rule: path, note
 - `ruled.csv` — paths already in a generated bot rule: path, ruled_at, count_when_ruled, rule
 - `rules.csv` — generated rules: name, cloudflare_name, created, updated, md5, frozen, chars, prefix
 - `rules/botfuzz-N.txt` — paste-ready expression for each named rule (updated in place while open)

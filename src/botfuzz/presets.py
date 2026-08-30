@@ -15,6 +15,7 @@ OBVIOUS_BAD_EXPRESSION = """\
 (http.request.uri.path contains "/.env") or
 (http.request.uri.path contains "/cgi-bin") or
 (http.request.uri.path contains "/graphql") or
+(http.request.uri.path contains "/actuator") or
 (http.request.uri.path contains ".vite/manifest.json") or
 (http.request.uri.path in {"/build/manifest.json" "/dist/manifest.json"}) or
 (http.request.uri.path contains "/.well-known/" and lower(http.request.uri.path) contains ".php")"""
@@ -29,6 +30,7 @@ NOT_WORDPRESS_EXPRESSION = """\
 (http.request.uri.path contains "/wp-includes") or
 (http.request.uri.path contains "/wp-json") or
 (http.request.uri.path contains "/wp-config") or
+(http.request.uri.path contains "/wp/") or
 (http.request.uri.path contains "xmlrpc.php") or
 (http.request.uri.path contains "/wordpress/")"""
 
@@ -56,6 +58,7 @@ _WP_CONTAINS = (
     "/wp-includes",
     "/wp-json",
     "/wp-config",
+    "/wp/",
     "xmlrpc.php",
     "/wordpress/",
 )
@@ -72,6 +75,8 @@ def covers_obvious_bad(path: str) -> bool:
     if any(n in path or n in lowered for n in _OBVIOUS_CONTAINS):
         return True
     if "graphql" in lowered:
+        return True
+    if "/actuator" in lowered:
         return True
     if ".vite/manifest.json" in lowered:
         return True

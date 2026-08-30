@@ -100,6 +100,20 @@ class Allowed:
     note: str = ""
 
 
+def is_allowed(path: str, allow: dict[str, Allowed]) -> bool:
+    """Exact path, or a prefix entry that ends with /."""
+    if not path or not allow:
+        return False
+    if path in allow:
+        return True
+    for key in allow:
+        if not key.endswith("/"):
+            continue
+        if path.startswith(key) or path == key.rstrip("/"):
+            return True
+    return False
+
+
 @dataclass
 class FileWatermark:
     path: str = ""
@@ -277,7 +291,7 @@ class Store:
         return [
             h for h in self.hits.values()
             if h.path not in self.ruled
-            and h.path not in self.allow
+            and not is_allowed(h.path, self.allow)
             and not covers_path(h.path, enabled)
             and not is_legit_path(h.path)
         ]
@@ -316,7 +330,7 @@ class Store:
         stamped = (when or datetime.now(timezone.utc)).isoformat()
         added = 0
         for path in paths:
-            if path in self.ruled or path in self.allow:
+            if path in self.ruled or is_allowed(path, self.allow):
                 continue
             if covers_path(path, self.enabled_presets()):
                 continue

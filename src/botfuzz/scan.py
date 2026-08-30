@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from .csvstore import Store
+from .csvstore import Store, is_allowed
 from .parse import iter_log_lines, list_log_files, parse_access_line
 from .presets import covers_path
 from .probes import is_probe
@@ -95,6 +95,8 @@ def scan_files(store: Store, files: list[str]) -> ScanStats:
             stats.probes += 1
             if covers_path(event.path, enabled):
                 stats.preset_probes += 1
+                continue
+            if is_allowed(event.path, store.allow):
                 continue
             if store.note_hit(event.path, event.time, event.status, event.ip):
                 stats.new_paths += 1
