@@ -16,7 +16,9 @@ and those hits are not counted in `hits.csv`.
 
 1. **obvious-bad** — always on. `.git`, `.svn`, `.htpasswd`, `.env`, `cgi-bin`,
    GraphQL, Vite/build `manifest.json`, Vite internals (`/@fs/`, `/@vite/`,
-   `/@id/`, `/@react-refresh`, `/__vite`), and PHP under `/.well-known/`.
+   `/@id/`, `/@react-refresh`, `/__vite`), path traversal (three or more `../`,
+   like `../../../`, plus the usual `%2e%2e` encodings), and PHP under
+   `/.well-known/`.
 2. **not-wordpress** — on by default. Turn off if the host runs WordPress.
 
     ./botfuzz preset                     # on/off (writes data/presets.csv)

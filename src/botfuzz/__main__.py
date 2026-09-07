@@ -277,6 +277,11 @@ def self_test() -> int:
             '"GET /__vite_ping HTTP/1.1" 404 123 "-" "curl/8.0"',
             True,
         ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /../../../../etc/passwd HTTP/1.1" 400 123 "-" "curl/8.0"',
+            True,
+        ),
     ]
     failed = 0
     for raw, expect in cases:
@@ -376,6 +381,21 @@ def self_test() -> int:
         return 1
     if not covers_obvious_bad("/__vite_ping"):
         print("FAIL expected /__vite_ping to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/../../../etc/passwd"):
+        print("FAIL expected ../../../ traversal to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/../../../../etc/passwd"):
+        print("FAIL expected ../../../.. traversal to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/%2e%2e/%2e%2e/%2e%2e/etc/passwd"):
+        print("FAIL expected encoded ../../../ traversal to be obvious-bad")
+        return 1
+    if covers_obvious_bad("/foo/../bar") or covers_obvious_bad("/foo/../../etc/passwd"):
+        print("FAIL one or two ../ should not be obvious-bad")
+        return 1
+    if covers_obvious_bad("/%2e%2e/%2e%2e/etc/passwd"):
+        print("FAIL two encoded .. hops should not be obvious-bad")
         return 1
     store.hits["/wp-login.php"] = Hit(path="/wp-login.php", count=99)
     store.hits["/wp-admin/setup-config.php"] = Hit(path="/wp-admin/setup-config.php", count=50)

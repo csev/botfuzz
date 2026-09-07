@@ -21,6 +21,9 @@ OBVIOUS_BAD_EXPRESSION = """\
 (http.request.uri.path contains "/@id/") or
 (http.request.uri.path contains "/@react-refresh") or
 (http.request.uri.path contains "/__vite") or
+(http.request.uri contains "../../..") or
+(http.request.uri contains "%2e%2e%2f%2e%2e%2f%2e%2e") or
+(http.request.uri contains "%2e%2e/%2e%2e/%2e%2e") or
 (http.request.uri.path contains "/.well-known/" and lower(http.request.uri.path) contains ".php")"""
 
 NOT_WORDPRESS_EXPRESSION = """\
@@ -39,6 +42,16 @@ NOT_WORDPRESS_EXPRESSION = """\
 
 _OBVIOUS_CONTAINS = ("/.git", "/.svn", "/.htpasswd", "/.env", "/cgi-bin")
 _VITE_INTERNALS = ("/@fs/", "/@vite/", "/@id/", "/@react-refresh", "/__vite")
+# Three or more parent hops: ../../../.. and the usual encodings.
+_DOTDOT_TRAVERSAL = (
+    "../../..",
+    "..\\..\\..",
+    "..%2f..%2f..",
+    "..%5c..%5c..",
+    "%2e%2e/%2e%2e/%2e%2e",
+    "%2e%2e%2f%2e%2e%2f%2e%2e",
+    "%2e%2e%5c%2e%2e%5c%2e%2e",
+)
 _WP_EXACT = {"/wp", "/wp.php", "/wordpress", "/wordpress/"}
 _WP_STARTS = ("/wp-", "/wp/")
 _WP_CONTAINS = (
@@ -73,6 +86,8 @@ def covers_obvious_bad(path: str) -> bool:
     if lowered in ("/build/manifest.json", "/dist/manifest.json"):
         return True
     if any(n in path or n in lowered for n in _VITE_INTERNALS):
+        return True
+    if any(n in path or n in lowered for n in _DOTDOT_TRAVERSAL):
         return True
     if "/.well-known/" in lowered and ".php" in lowered:
         return True
@@ -112,10 +127,10 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     "obvious-bad": Preset(
         name="obvious-bad",
-        label="Obvious bad stuff (.git, .svn, .env, graphql, Vite internals, …)",
+        label="Obvious bad stuff (.git, .svn, .env, graphql, Vite internals, ../../../, …)",
         expression=OBVIOUS_BAD_EXPRESSION,
         default_enabled=True,
-        recommended="Leave this on. Nobody should serve .git, GraphQL, or Vite /@fs/ internals.",
+        recommended="Leave this on. Nobody should serve .git, GraphQL, Vite internals, or path traversal.",
         covers=covers_obvious_bad,
     ),
     "not-wordpress": Preset(
