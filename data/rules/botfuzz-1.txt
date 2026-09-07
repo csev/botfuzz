@@ -1,0 +1,33 @@
+# BotFuzz-1 2026-09-07 b24240b0c791
+# 1798/3800 chars  15 paths  OPEN
+((http.request.uri.path contains "/.git") or
+(http.request.uri.path contains "/.svn") or
+(http.request.uri.path contains "/.htpasswd") or
+(http.request.uri.path contains "/.env") or
+(http.request.uri.path contains "/cgi-bin") or
+(http.request.uri.path contains "/graphql") or
+(http.request.uri.path contains "/actuator") or
+(http.request.uri.path contains ".vite/manifest.json") or
+(http.request.uri.path in {"/build/manifest.json" "/dist/manifest.json"}) or
+(http.request.uri.path contains "/@fs/") or
+(http.request.uri.path contains "/@vite/") or
+(http.request.uri.path contains "/@id/") or
+(http.request.uri.path contains "/@react-refresh") or
+(http.request.uri.path contains "/__vite") or
+(http.request.uri contains "../../..") or
+(http.request.uri contains "%2e%2e%2f%2e%2e%2f%2e%2e") or
+(http.request.uri contains "%2e%2e/%2e%2e/%2e%2e") or
+(http.request.uri.path contains "/.well-known/" and lower(http.request.uri.path) contains ".php")) or
+((starts_with(http.request.uri.path, "/wp-")) or
+(starts_with(http.request.uri.path, "/wp/")) or
+(http.request.uri.path in {"/wp" "/wp.php" "/wordpress" "/wordpress/"}) or
+(http.request.uri.path contains "/wp-admin") or
+(http.request.uri.path contains "/wp-login") or
+(http.request.uri.path contains "/wp-content") or
+(http.request.uri.path contains "/wp-includes") or
+(http.request.uri.path contains "/wp-json") or
+(http.request.uri.path contains "/wp-config") or
+(http.request.uri.path contains "/wp/") or
+(http.request.uri.path contains "xmlrpc.php") or
+(http.request.uri.path contains "/wordpress/")) or
+(http.request.uri.path in {"/1.php" "/222.php" "/aaa.php" "/abcd.php" "/alfa.php" "/chosen.php" "/classwithtostring.php" "/file.php" "/goods.php" "/inputs.php" "/k.php" "/new.php" "/radio.php" "/simple.php" "/this_is_a_new_hello_world.php"})
