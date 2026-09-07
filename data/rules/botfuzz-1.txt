@@ -1,5 +1,5 @@
-# BotFuzz-1 2026-09-07 b24240b0c791
-# 1798/3800 chars  15 paths  OPEN
+# BotFuzz-1 2026-09-07 980b535cf62e
+# 1936/3800 chars  24 paths  OPEN
 ((http.request.uri.path contains "/.git") or
 (http.request.uri.path contains "/.svn") or
 (http.request.uri.path contains "/.htpasswd") or
@@ -30,4 +30,4 @@
 (http.request.uri.path contains "/wp/") or
 (http.request.uri.path contains "xmlrpc.php") or
 (http.request.uri.path contains "/wordpress/")) or
-(http.request.uri.path in {"/1.php" "/222.php" "/aaa.php" "/abcd.php" "/alfa.php" "/chosen.php" "/classwithtostring.php" "/file.php" "/goods.php" "/inputs.php" "/k.php" "/new.php" "/radio.php" "/simple.php" "/this_is_a_new_hello_world.php"})
+(http.request.uri.path in {"/1.php" "/222.php" "/3PJcpMFsD8B.php" "/4PJcpMFsD8B.php" "/aaa.php" "/abcd.php" "/alfa.php" "/autoload_classmap.php" "/chosen.php" "/classwithtostring.php" "/config.php" "/css.php" "/edit.php" "/file.php" "/goods.php" "/images.php" "/inputs.php" "/k.php" "/ms-edit.php" "/new.php" "/radio.php" "/simple.php" "/this_is_a_new_hello_world.php" "/w.php"})

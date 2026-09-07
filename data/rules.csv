@@ -1,5 +1,5 @@
 name,cloudflare_name,created,updated,md5,frozen,chars,prefix
-botfuzz-1,BotFuzz-1 2026-09-07 b24240b0c791,2026-09-07,2026-09-07,b24240b0c791,0,1798,"((http.request.uri.path contains ""/.git"") or
+botfuzz-1,BotFuzz-1 2026-09-07 980b535cf62e,2026-09-07,2026-09-07,980b535cf62e,0,1936,"((http.request.uri.path contains ""/.git"") or
 (http.request.uri.path contains ""/.svn"") or
 (http.request.uri.path contains ""/.htpasswd"") or
 (http.request.uri.path contains ""/.env"") or
