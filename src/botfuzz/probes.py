@@ -16,6 +16,7 @@ ACCESS_PROBE_PATH = re.compile(
     r"eval-stdin|thinkphp|proc/self|etc/passwd|"
     r"debug/default|telescope|_profiler|phpinfo|"
     r"shell\.php|filemanager|graphql|manifest\.json|"
+    r"/@fs/|/@vite/|/@id/|/@react-refresh|/__vite|"
     r"rclone\.conf|service-account\.json|livewire/|"
     r"%2eenv|%2e%2e|\.\./|"
     r"secrets\.json|credentials\.json|serviceAccountKey|service_account|"

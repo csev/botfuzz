@@ -16,6 +16,11 @@ OBVIOUS_BAD_EXPRESSION = """\
 (http.request.uri.path contains "/actuator") or
 (http.request.uri.path contains ".vite/manifest.json") or
 (http.request.uri.path in {"/build/manifest.json" "/dist/manifest.json"}) or
+(http.request.uri.path contains "/@fs/") or
+(http.request.uri.path contains "/@vite/") or
+(http.request.uri.path contains "/@id/") or
+(http.request.uri.path contains "/@react-refresh") or
+(http.request.uri.path contains "/__vite") or
 (http.request.uri.path contains "/.well-known/" and lower(http.request.uri.path) contains ".php")"""
 
 NOT_WORDPRESS_EXPRESSION = """\
@@ -33,6 +38,7 @@ NOT_WORDPRESS_EXPRESSION = """\
 (http.request.uri.path contains "/wordpress/")"""
 
 _OBVIOUS_CONTAINS = ("/.git", "/.svn", "/.htpasswd", "/.env", "/cgi-bin")
+_VITE_INTERNALS = ("/@fs/", "/@vite/", "/@id/", "/@react-refresh", "/__vite")
 _WP_EXACT = {"/wp", "/wp.php", "/wordpress", "/wordpress/"}
 _WP_STARTS = ("/wp-", "/wp/")
 _WP_CONTAINS = (
@@ -65,6 +71,8 @@ def covers_obvious_bad(path: str) -> bool:
     if ".vite/manifest.json" in lowered:
         return True
     if lowered in ("/build/manifest.json", "/dist/manifest.json"):
+        return True
+    if any(n in path or n in lowered for n in _VITE_INTERNALS):
         return True
     if "/.well-known/" in lowered and ".php" in lowered:
         return True
@@ -104,10 +112,10 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     "obvious-bad": Preset(
         name="obvious-bad",
-        label="Obvious bad stuff (.git, .svn, .env, graphql, vite manifests, …)",
+        label="Obvious bad stuff (.git, .svn, .env, graphql, Vite internals, …)",
         expression=OBVIOUS_BAD_EXPRESSION,
         default_enabled=True,
-        recommended="Leave this on. Nobody should serve .git, GraphQL, or leaked Vite manifests.",
+        recommended="Leave this on. Nobody should serve .git, GraphQL, or Vite /@fs/ internals.",
         covers=covers_obvious_bad,
     ),
     "not-wordpress": Preset(

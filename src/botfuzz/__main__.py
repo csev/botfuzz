@@ -262,6 +262,21 @@ def self_test() -> int:
             '403 123 "-" "curl/8.0"',
             True,
         ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /@fs/home/app/src/main.js HTTP/1.1" 404 123 "-" "curl/8.0"',
+            True,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /@react-refresh HTTP/1.1" 404 123 "-" "curl/8.0"',
+            True,
+        ),
+        (
+            '1.2.3.4 - - [27/Aug/2026:00:00:03 +0000] '
+            '"GET /__vite_ping HTTP/1.1" 404 123 "-" "curl/8.0"',
+            True,
+        ),
     ]
     failed = 0
     for raw, expect in cases:
@@ -352,6 +367,15 @@ def self_test() -> int:
         return 1
     if not covers_obvious_bad("/actuator/env"):
         print("FAIL expected /actuator/env to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/@fs/home/app") or not covers_obvious_bad("/@vite/client"):
+        print("FAIL expected Vite /@fs/ and /@vite/ to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/@id/virtual") or not covers_obvious_bad("/@react-refresh"):
+        print("FAIL expected Vite /@id/ and /@react-refresh to be obvious-bad")
+        return 1
+    if not covers_obvious_bad("/__vite_ping"):
+        print("FAIL expected /__vite_ping to be obvious-bad")
         return 1
     store.hits["/wp-login.php"] = Hit(path="/wp-login.php", count=99)
     store.hits["/wp-admin/setup-config.php"] = Hit(path="/wp-admin/setup-config.php", count=50)
